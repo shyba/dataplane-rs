@@ -1,0 +1,16 @@
+[package]
+name = "dataplane-nif"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rustler = "0.37"
+libc = "0.2"
+dataplane-runtime = { path = "../dataplane-runtime", features = ["erlang-nif"] }
+once_cell = "1.19"
+
+[dev-dependencies]
+rustler = "0.37"
+
+[lints.rust]
+unsafe_code = "deny"

@@ -1,0 +1,9 @@
+[package]
+name = "dataplane-rp2040-smoke"
+version = "0.1.0"
+edition = "2021"
+
+[target.'cfg(target_os = "none")'.dependencies]
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+dataplane-runtime = { path = "../dataplane-runtime", default-features = false, features = ["rp2040-integration"] }

@@ -1,0 +1,11 @@
+[package]
+name = "dataplane-raspi3b-mmu-smoke"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+
+[dependencies]
+dataplane-microkernel-core = { path = "../dataplane-microkernel-core" }
+dataplane-runtime = { path = "../dataplane-runtime", default-features = false, features = ["noalloc"] }

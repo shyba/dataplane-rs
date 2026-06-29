@@ -1,0 +1,52 @@
+#![deny(clippy::undocumented_unsafe_blocks)]
+
+pub mod local_boundary;
+pub mod local_exec;
+pub mod local_exec_counts;
+pub mod local_ingress;
+mod nif;
+pub mod replay_protocol;
+mod runtime;
+// NOTE: runtime_command and runtime_config are #[path] submodules of the runtime
+// module (runtime.rs) — they are NOT declared here.  They cannot be promoted to
+// top-level lib.rs modules because runtime_shard.rs and runtime_launch.rs both
+// import Command via "use crate::runtime::Command" (not crate::runtime_command).
+// Moving these modules to lib.rs would break those import paths and create a
+// cycle.  The #[path] attribute preserves physical adjacency while keeping the
+// import paths intact.
+mod runtime_id_map;
+mod runtime_launch;
+mod runtime_pending_reply;
+mod runtime_registration;
+mod runtime_result_queue;
+mod runtime_startup;
+#[path = "runtime_stop_state.rs"]
+mod runtime_stop_state;
+pub(crate) use dataplane_nif::runtime_adapter;
+mod runtime_arena;
+mod runtime_boundary;
+mod runtime_connection_table;
+mod runtime_dispatch;
+mod runtime_driver;
+mod runtime_ingress;
+mod runtime_listener_table;
+mod runtime_reactor;
+mod runtime_ring_pair;
+mod runtime_session;
+mod runtime_stats;
+#[allow(unused_imports)]
+pub(crate) use dataplane_reactor::reactor;
+pub(crate) use dataplane_runtime::errors;
+pub(crate) use dataplane_runtime::runtime_protocol;
+pub(crate) use dataplane_runtime::runtime_scheduler;
+pub(crate) use dataplane_runtime::runtime_topology;
+pub(crate) use dataplane_runtime::socket;
+
+rustler::init! {
+    "ranch_uring_nif",
+    load = on_load
+}
+
+fn on_load(env: rustler::Env, _info: rustler::Term) -> bool {
+    env.register::<socket::SocketRef>().is_ok()
+}

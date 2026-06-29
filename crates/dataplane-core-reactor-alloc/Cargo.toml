@@ -1,0 +1,10 @@
+[package]
+name = "dataplane-core-reactor-alloc"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+
+[dev-dependencies]
+proptest = "1"

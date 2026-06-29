@@ -1,0 +1,9 @@
+[package]
+name = "dataplane-compat-tokio"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+dataplane-compat = { path = "../dataplane-compat" }
+dataplane-runtime = { path = "../dataplane-runtime" }
+tokio = { version = "1", features = ["rt", "sync", "net", "io-util"] }

@@ -1,0 +1,12 @@
+[package]
+name = "dataplane-x86_64-microkernel-smoke"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+fat32-write-proof = []
+preallocated-journal-file-proof = ["fat32-write-proof"]
+
+[dependencies]
+dataplane-microkernel-core = { path = "../dataplane-microkernel-core" }

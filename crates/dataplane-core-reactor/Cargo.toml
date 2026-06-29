@@ -1,0 +1,58 @@
+[package]
+name = "dataplane-core-reactor"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = ["host-core"]
+host-core = [
+    "dep:arrayvec",
+    "dep:bump-scope",
+    "dep:crossbeam-queue",
+    "dep:io-uring",
+    "dep:kanal",
+    "dep:libc",
+    "dep:quanta",
+    "dep:rtrb",
+    "dep:rustix",
+    "dep:socket2",
+    "slotmap",
+    "dep:thunderdome",
+    "dataplane-core-reactor-alloc",
+    "dataplane-topology-default",
+]
+trace-stamps = []
+scheduler-tracing = ["dep:tracing"]
+slotmap = ["dep:slotmap"]
+noalloc = []
+rp2040-noalloc = ["noalloc"]
+rp2040-compile = ["dataplane-core-reactor-alloc"]
+dataplane-core-reactor-alloc = ["dep:dataplane-core-reactor-alloc"]
+dataplane-topology-default = ["dep:dataplane-topology"]
+
+[dependencies]
+arrayvec = { version = "0.7", optional = true }
+bump-scope = { version = "2.2.0", optional = true }
+crossbeam-queue = { version = "0.3", optional = true }
+kanal = { version = "0.1", optional = true }
+quanta = { version = "0.12", optional = true }
+rtrb = { version = "0.3", optional = true }
+socket2 = { version = "0.5", optional = true }
+slotmap = { version = "1.0", optional = true }
+thunderdome = { version = "0.6", optional = true }
+tracing = { version = "0.1", optional = true }
+dataplane-topology = { path = "../dataplane-topology", optional = true }
+dataplane-core-reactor-alloc = { path = "../dataplane-core-reactor-alloc", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+io-uring = { version = "0.7", optional = true }
+libc = { version = "0.2", optional = true }
+rustix = { version = "1.1", features = ["thread"], optional = true }
+
+[dev-dependencies]
+criterion = "0.5"
+proptest = "1"
+
+[[bench]]
+name = "native_task_engine"
+harness = false

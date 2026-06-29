@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+    "applications/erlang/ranch_uring/native",
+    "crates/dataplane-core-reactor-alloc",
+    "crates/dataplane-core-reactor",
+    "crates/dataplane-compat",
+    "crates/dataplane-compat-tokio",
+    "crates/dataplane-nif",
+    "crates/dataplane-reactor",
+    "crates/dataplane-runtime",
+    "crates/dataplane-topology",
+    "crates/dataplane-microkernel-core",
+    "crates/dataplane-x86_64-microkernel-smoke",
+    "crates/dataplane-qemu-cortexm0-smoke",
+    "crates/dataplane-raspi3b-mmu-smoke",
+    "crates/dataplane-x86_64-virtio-smoke",
+    "crates/dataplane-rp2040-smoke",
+    "crates/dataplane-rp2040-noalloc-smoke",
+]

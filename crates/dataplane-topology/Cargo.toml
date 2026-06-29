@@ -1,0 +1,8 @@
+[package]
+name = "dataplane-topology"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+core_affinity = "0.8"
+hwlocality = "1.0.0-alpha.12"

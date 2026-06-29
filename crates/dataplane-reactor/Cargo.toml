@@ -1,0 +1,28 @@
+[package]
+name = "dataplane-reactor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bumpalo = { version = "3", features = ["boxed"] }
+io-uring = "0.7"
+socket2 = "0.5"
+libc = "0.2"
+quanta = "0.12"
+dataplane-core-reactor = { path = "../dataplane-core-reactor" }
+dataplane-runtime = { path = "../dataplane-runtime" }
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "uring_reactor"
+harness = false
+
+[[bench]]
+name = "reactor_abstraction"
+harness = false
+
+[[bench]]
+name = "threadless_runtime_loop"
+harness = false

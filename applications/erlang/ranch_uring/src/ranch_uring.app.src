@@ -1,0 +1,7 @@
+{application, ranch_uring, [
+    {description, "Ranch transport backed by io_uring NIFs"},
+    {vsn, "0.1.0"},
+    {modules, []},
+    {applications, [kernel, stdlib, ranch]},
+    {mod, {ranch_uring_app, []}}
+]}.

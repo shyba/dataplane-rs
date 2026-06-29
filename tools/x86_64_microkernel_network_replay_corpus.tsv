@@ -1,0 +1,11 @@
+case_id	family	direction	expected	artifact_key	serial_marker	pcap_hex	note
+arp_request_reply	arp	host-to-guest	pass	seen_arp_reply=true	DPMK:NET-ARP-REPLY	0806	ARP request has a VM reply and serial marker.
+icmp_echo_reply	icmp	host-to-guest	pass	seen_icmp_reply=true	DPMK:NET-ICMP-REPLY	445050494e473030	ICMP echo payload DPPING00 has a VM reply.
+udp_control_echo	udp-control	host-to-guest	pass	seen_udp_echo=true	DPMK:NET-UDP-ECHO	4450554450523030	Fixed control response magic DPUDPR00 is pcap-backed.
+tcp_http_get	http	host-to-guest	pass	http_get_index_ok=true	DPMK:HTTP-GET-OK	-	HTTP GET /INDEX.HTM is host-log and serial backed.
+tcp_http_head	http	host-to-guest	pass	http_head_index_ok=true	DPMK:HTTP-HEAD-OK	-	HTTP HEAD /INDEX.HTM is host-log and serial backed.
+udp_bad_magic	udp-control-negative	host-to-guest	reject	control_protocol_v1_bad_magic_rejected=true	DPMK:NET-UDP-ECHO	4450554450513030	Bad control magic is sent but does not produce a negative response.
+udp_overlong_payload	udp-control-negative	host-to-guest	reject	control_protocol_v1_overlong_payload_rejected=true	DPMK:NET-UDP-ECHO	4450554450513030	Overlong control payload is rejected by the fixed-size parser.
+udp_wrong_route	udp-control-negative	host-to-guest	reject	control_protocol_v1_wrong_route_rejected=true	DPMK:NET-UDP-ECHO	4450554450513030	Wrong UDP destination port is rejected.
+tcp_duplicate_control	tcp-negative	host-to-guest	reject	-	DPMK:TCP-CTRL-DUPLICATE:1	-	Duplicate TCP control path is counted in the guest ledger.
+tcp_malformed_partial	tcp-negative	host-to-guest	reject	-	DPMK:TCP-CTRL-PARTIAL:1	-	Partial TCP control path is counted in the guest ledger.

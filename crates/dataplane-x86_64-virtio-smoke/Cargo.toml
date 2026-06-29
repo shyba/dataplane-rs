@@ -1,0 +1,13 @@
+[package]
+name = "dataplane-x86_64-virtio-smoke"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+shard-bench = []
+udp-bench = []
+
+[dependencies]
+dataplane-microkernel-core = { path = "../dataplane-microkernel-core" }
+dataplane-runtime = { path = "../dataplane-runtime", default-features = false, features = ["noalloc"] }

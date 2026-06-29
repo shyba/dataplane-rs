@@ -1,0 +1,87 @@
+use dataplane_microkernel_core::{
+    CapabilityId, EndpointId, NetworkFrameBufferId, RequestId, TaskId,
+};
+
+pub(crate) const TASK_TABLE_SLOTS: usize = 9;
+pub(crate) const BLOCK_TASK_BYTES: usize = 16 * 1024;
+pub(crate) const FS_TASK_BYTES: usize = 4096;
+pub(crate) const NET_TASK_BYTES: usize = 64 * 1024;
+pub(crate) const BLOCK_VIRTQ_BYTES: usize = 12 * 1024;
+pub(crate) const NET_VIRTQ_BYTES: usize = 16 * 1024;
+pub(crate) const BLOCK_SECTOR_BYTES: usize = 512;
+pub(crate) const BLOCK_QUEUE_OFFSET: usize = 0;
+pub(crate) const BLOCK_REQUEST_OFFSET: usize = BLOCK_VIRTQ_BYTES;
+pub(crate) const FS_SECTOR_OFFSET: usize = 0;
+pub(crate) const RX_QUEUE_OFFSET: usize = 0;
+pub(crate) const TX_QUEUE_OFFSET: usize = 16 * 1024;
+pub(crate) const RX_BUFFER_OFFSET: usize = 32 * 1024;
+pub(crate) const TX_BUFFER_OFFSET: usize = 36 * 1024;
+pub(crate) const NET_FRAME_OFFSET: usize = 48 * 1024;
+pub(crate) const ETHERNET_HEADER_BYTES: usize = 14;
+pub(crate) const ETHERNET_MIN_FRAME_BYTES: usize = 60;
+pub(crate) const ARP_FRAME_BYTES: usize = 42;
+pub(crate) const IPV4_HEADER_BYTES: usize = 20;
+pub(crate) const ICMP_PROBE_FRAME_BYTES: usize = ETHERNET_HEADER_BYTES + IPV4_HEADER_BYTES + 8;
+pub(crate) const UDP_PROBE_FRAME_BYTES: usize = ETHERNET_HEADER_BYTES + IPV4_HEADER_BYTES + 8 + 4;
+pub(crate) const BLOCK_QUEUE_CAP: u16 = 256;
+pub(crate) const NET_QUEUE_CAP: u16 = 256;
+pub(crate) const VIRTIO_NET_HDR_LEN: usize = 10;
+pub(crate) const TX_FRAME_LEN: usize = 768;
+pub(crate) const TX_PACKET_LEN: usize = VIRTIO_NET_HDR_LEN + TX_FRAME_LEN;
+pub(crate) const VM_MAC: [u8; 6] = [0x52, 0x54, 0x00, 0x12, 0x34, 0x56];
+pub(crate) const VM_IPV4: [u8; 4] = [10, 0, 0, 2];
+pub(crate) const HOST_UDP_PORT: u16 = 40_000;
+pub(crate) const VM_UDP_PORT: u16 = 40_001;
+pub(crate) const HTTP_SERVER_PORT: u16 = 80;
+pub(crate) const DHCP_SERVER_PORT: u16 = 67;
+pub(crate) const DHCP_CLIENT_PORT: u16 = 68;
+pub(crate) const ETHER_TYPE_ARP: u16 = 0x0806;
+pub(crate) const ETHER_TYPE_IPV4: u16 = 0x0800;
+pub(crate) const IPV4_PROTOCOL_ICMP: u8 = 1;
+pub(crate) const IPV4_PROTOCOL_TCP: u8 = 6;
+pub(crate) const IPV4_PROTOCOL_UDP: u8 = 17;
+
+pub(crate) const TIMER_TASK_ID_NUM: u16 = 1;
+pub(crate) const TIMER_ENDPOINT_ID_NUM: u16 = 1;
+pub(crate) const TIMER_REQUEST_ID_NUM: u32 = 1;
+
+pub(crate) const TASK_TIMER: TaskId = TaskId::new(TIMER_TASK_ID_NUM);
+pub(crate) const TASK_CLI: TaskId = TaskId::new(2);
+pub(crate) const TASK_FS: TaskId = TaskId::new(3);
+pub(crate) const TASK_BLOCK: TaskId = TaskId::new(4);
+pub(crate) const TASK_NET: TaskId = TaskId::new(5);
+pub(crate) const TASK_TCPIP: TaskId = TaskId::new(6);
+pub(crate) const TASK_HTTP: TaskId = TaskId::new(7);
+pub(crate) const TASK_DHCP: TaskId = TaskId::new(8);
+
+pub(crate) const EP_TIMER: EndpointId = EndpointId::new(TIMER_ENDPOINT_ID_NUM);
+pub(crate) const EP_CLI: EndpointId = EndpointId::new(2);
+pub(crate) const EP_FS: EndpointId = EndpointId::new(3);
+pub(crate) const EP_BLOCK: EndpointId = EndpointId::new(4);
+pub(crate) const EP_NET: EndpointId = EndpointId::new(5);
+pub(crate) const EP_TCPIP: EndpointId = EndpointId::new(6);
+pub(crate) const EP_HTTP: EndpointId = EndpointId::new(7);
+pub(crate) const EP_DHCP: EndpointId = EndpointId::new(8);
+
+pub(crate) const CAP_KERNEL: CapabilityId = CapabilityId::new(1);
+pub(crate) const CAP_CLI_HELP: CapabilityId = CapabilityId::new(2);
+pub(crate) const CAP_CLI_TASKS: CapabilityId = CapabilityId::new(3);
+pub(crate) const CAP_CLI_FS_LS: CapabilityId = CapabilityId::new(4);
+pub(crate) const CAP_CLI_FS_CAT: CapabilityId = CapabilityId::new(5);
+pub(crate) const CAP_CLI_FS_STAT: CapabilityId = CapabilityId::new(6);
+pub(crate) const CAP_CLI_FS_NEGATIVE: CapabilityId = CapabilityId::new(7);
+pub(crate) const CAP_CLI_TASK_TIMER: CapabilityId = CapabilityId::new(8);
+pub(crate) const CAP_CLI_TASK_FS: CapabilityId = CapabilityId::new(9);
+pub(crate) const CAP_CLI_TASK_BLOCK: CapabilityId = CapabilityId::new(10);
+pub(crate) const CAP_CLI_TASK_TCPIP: CapabilityId = CapabilityId::new(11);
+pub(crate) const CAP_CLI_QUEUES: CapabilityId = CapabilityId::new(12);
+pub(crate) const CAP_CLI_PARITY: CapabilityId = CapabilityId::new(13);
+pub(crate) const GENERATION_ID: u32 = 1;
+pub(crate) const REQUEST_TIMER_TICK: RequestId = RequestId::new(TIMER_REQUEST_ID_NUM);
+pub(crate) const REQUEST_CLI_FS: RequestId = RequestId::new(2);
+pub(crate) const REQUEST_FS_BLOCK: RequestId = RequestId::new(3);
+pub(crate) const REQUEST_TCPIP_NET: RequestId = RequestId::new(4);
+pub(crate) const REQUEST_HTTP_FS: RequestId = RequestId::new(5);
+pub(crate) const REQUEST_DHCP_NET: RequestId = RequestId::new(6);
+pub(crate) const NET_RX_BUFFER_ID: NetworkFrameBufferId = NetworkFrameBufferId::new(1);
+pub(crate) const NET_TX_BUFFER_ID: NetworkFrameBufferId = NetworkFrameBufferId::new(2);

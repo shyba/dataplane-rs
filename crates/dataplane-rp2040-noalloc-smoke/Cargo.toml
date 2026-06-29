@@ -1,0 +1,12 @@
+[package]
+name = "dataplane-rp2040-noalloc-smoke"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+
+[target.'cfg(target_os = "none")'.dependencies]
+cortex-m = "0.7"
+cortex-m-rt = "0.7"
+dataplane-runtime = { path = "../dataplane-runtime", default-features = false, features = ["noalloc"] }
