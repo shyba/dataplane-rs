@@ -258,7 +258,7 @@ def check_raspi3b() -> None:
     require_body(source, "impl UsbEthernetTask", "capture_rx_frame", "UsbEthernetTask must capture RX evidence from the bulk-IN buffer")
     require_body(source, "impl UsbEthernetTask", "self.rx_frame_len = data_len", "UsbEthernetTask must store the validated RX Ethernet frame length")
     require_body(source, "impl UsbEthernetTask", "BULK_RX_FRAME_OFFSET", "UsbEthernetTask must keep RX buffer evidence distinct from TX buffer evidence")
-    require_body(source, "impl UsbEthernetTask", "start_bulk_in_transfer", "UsbEthernetTask must receive through the USB bulk transport boundary")
+    require_body(source, "pub(super) fn poll_start_bulk_in", "start_bulk_in_transfer", "UsbEthernetTask must receive through the USB bulk transport boundary")
     require_body(source, "fn receive_frame(", "self.rx_frame_len", "receive_frame must return the validated RX Ethernet frame length")
     reject_body(source, "fn receive_frame(", "self.rx_transport_len as usize", "receive_frame must not report the bounded USB transport length as descriptor length")
     reject_body(source, "fn receive_frame(", "BULK_FRAME_OFFSET", "receive_frame must not reuse the TX RNDIS buffer as RX evidence")

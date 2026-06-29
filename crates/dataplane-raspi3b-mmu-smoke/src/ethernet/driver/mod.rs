@@ -3,26 +3,25 @@ use dataplane_microkernel_core::{
     NetworkFrameType, ReceivedFrame,
 };
 
-pub(in crate::ethernet::driver) use crate::config::SHARD_REGION_SIZE;
 pub(in crate::ethernet::driver) use super::buffers::{
     clear_range, descriptor_class, dma_clean_invalidate_range, dma_clean_range,
     dma_invalidate_range, read_u32, read_u8, write_u16, write_u32, write_u8,
 };
 pub(in crate::ethernet::driver) use super::constants::{
     BULK_FRAME_OFFSET, BULK_RX_FRAME_OFFSET, DESCRIPTOR_OFFSET, DEVICE_DESCRIPTOR_LEN,
-    DEVICE_DESCRIPTOR_TYPE, ETHERNET_FRAME_LEN, GAHBCFG, GAHBCFG_DMA_EN,
-    GAHBCFG_GLBL_INTR_EN, GET_DEVICE_DESCRIPTOR, HCINT0, HCINT_BBLERR, HCINT_CHHLTD,
-    HCINT_DATATGLERR, HCINT_STALL, HCINT_XACTERR, HCINT_XFERCOMP, HCTSIZ0, HCTSIZ_PID_DATA1,
-    HCTSIZ_PID_SETUP, HUB_ADDRESS, HUB_CONFIGURATION_VALUE, HUB_PORT_ONE, HUB_PORT_POWER,
-    HUB_PORT_RESET, HUB_PORT_STATUS_CONNECTION, HUB_PORT_STATUS_ENABLE, HPRT, HPRT_CONN,
-    HPRT_ENABLE, HPRT_POWER, HPRT_RESET, PORT_STATUS_OFFSET, RNDIS_COMMAND_OFFSET,
-    RNDIS_CONFIGURATION_VALUE, RNDIS_HEADER_LEN, RNDIS_INIT_CMPLT_LEN, RNDIS_INIT_MSG_LEN,
-    RNDIS_INITIALIZE_CMPLT, RNDIS_MAX_TOTAL_SIZE, RNDIS_PACKET_LEN, RNDIS_PACKET_MSG,
-    RNDIS_RESPONSE_OFFSET, RNDIS_SET_CMPLT, RNDIS_SET_CMPLT_LEN, RNDIS_SET_MSG_LEN,
-    RNDIS_STATUS_SUCCESS, SETUP_OFFSET, USB_CLASS_COMM, USB_CLASS_HUB,
-    USB_CDC_GET_ENCAPSULATED_RESPONSE, USB_CDC_SEND_ENCAPSULATED_COMMAND, USB_NET_ADDRESS,
+    DEVICE_DESCRIPTOR_TYPE, ETHERNET_FRAME_LEN, GAHBCFG, GAHBCFG_DMA_EN, GAHBCFG_GLBL_INTR_EN,
+    GET_DEVICE_DESCRIPTOR, GSNPSID, HCINT0, HCINT_BBLERR, HCINT_CHHLTD, HCINT_DATATGLERR,
+    HCINT_STALL, HCINT_XACTERR, HCINT_XFERCOMP, HCTSIZ0, HCTSIZ_PID_DATA1, HCTSIZ_PID_SETUP, HPRT,
+    HPRT_CONN, HPRT_ENABLE, HPRT_POWER, HPRT_RESET, HUB_ADDRESS, HUB_CONFIGURATION_VALUE,
+    HUB_PORT_ONE, HUB_PORT_POWER, HUB_PORT_RESET, HUB_PORT_STATUS_CONNECTION,
+    HUB_PORT_STATUS_ENABLE, NET_RX_BUFFER_ID, NET_TX_BUFFER_ID, PORT_STATUS_OFFSET, REGION_MAGIC,
+    RNDIS_COMMAND_OFFSET, RNDIS_CONFIGURATION_VALUE, RNDIS_HEADER_LEN, RNDIS_INITIALIZE_CMPLT,
+    RNDIS_INIT_CMPLT_LEN, RNDIS_INIT_MSG_LEN, RNDIS_MAX_TOTAL_SIZE, RNDIS_PACKET_LEN,
+    RNDIS_PACKET_MSG, RNDIS_RESPONSE_OFFSET, RNDIS_SET_CMPLT, RNDIS_SET_CMPLT_LEN,
+    RNDIS_SET_MSG_LEN, RNDIS_STATUS_SUCCESS, SETUP_OFFSET, USB_CDC_GET_ENCAPSULATED_RESPONSE,
+    USB_CDC_SEND_ENCAPSULATED_COMMAND, USB_CLASS_COMM, USB_CLASS_HUB, USB_NET_ADDRESS,
     USB_REQ_GET_DESCRIPTOR, USB_REQ_GET_STATUS, USB_REQ_SET_ADDRESS, USB_REQ_SET_CONFIGURATION,
-    USB_REQ_SET_FEATURE, GSNPSID, NET_RX_BUFFER_ID, NET_TX_BUFFER_ID, REGION_MAGIC,
+    USB_REQ_SET_FEATURE,
 };
 pub(in crate::ethernet::driver) use super::rndis::{
     prepare_rndis_initialize, prepare_rndis_packet_filter, prepare_rndis_probe_frame,
@@ -32,6 +31,7 @@ pub(in crate::ethernet::driver) use super::usb::{
     dma_addr, hprt_write_value, read_reg, start_bulk_in_transfer, start_bulk_out_transfer,
     start_control_status, start_control_transfer, write_reg,
 };
+pub(in crate::ethernet::driver) use crate::config::SHARD_REGION_SIZE;
 
 mod phase_bulk;
 mod phase_hub_descriptor;
@@ -387,9 +387,8 @@ impl UsbEthernetTask {
     ) {
         self.descriptor_head = read_u32(region, DESCRIPTOR_OFFSET);
         self.descriptor_tail = read_u32(region, DESCRIPTOR_OFFSET + 4);
-        self.descriptor_valid =
-            read_u8(region, DESCRIPTOR_OFFSET) == DEVICE_DESCRIPTOR_LEN as u8
-                && read_u8(region, DESCRIPTOR_OFFSET + 1) == DEVICE_DESCRIPTOR_TYPE;
+        self.descriptor_valid = read_u8(region, DESCRIPTOR_OFFSET) == DEVICE_DESCRIPTOR_LEN as u8
+            && read_u8(region, DESCRIPTOR_OFFSET + 1) == DEVICE_DESCRIPTOR_TYPE;
         if !self.descriptor_valid {
             self.error = self.descriptor_head;
         }
@@ -401,8 +400,7 @@ impl UsbEthernetTask {
     ) -> bool {
         self.rx_frame_head = read_u32(region, BULK_RX_FRAME_OFFSET);
         self.rx_transport_len = RNDIS_MAX_TOTAL_SIZE - (read_reg(HCTSIZ0) & 0x7ffff);
-        if self.rx_transport_len < RNDIS_HEADER_LEN as u32
-            || self.rx_frame_head != RNDIS_PACKET_MSG
+        if self.rx_transport_len < RNDIS_HEADER_LEN as u32 || self.rx_frame_head != RNDIS_PACKET_MSG
         {
             self.error = self.rx_frame_head;
             return false;
@@ -416,9 +414,8 @@ impl UsbEthernetTask {
             || data_len < ETHERNET_FRAME_LEN as u32
             || frame_offset + data_len > packet_len
             || frame_offset.saturating_add(data_len) > RNDIS_MAX_TOTAL_SIZE
-            || BULK_RX_FRAME_OFFSET.saturating_add(
-                frame_offset.saturating_add(data_len) as usize,
-            ) > SHARD_REGION_SIZE
+            || BULK_RX_FRAME_OFFSET.saturating_add(frame_offset.saturating_add(data_len) as usize)
+                > SHARD_REGION_SIZE
         {
             self.error = packet_len;
             return false;

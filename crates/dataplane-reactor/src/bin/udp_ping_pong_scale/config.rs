@@ -1,8 +1,7 @@
 use super::types::{Backend, ServerRecvMode};
 use dataplane_runtime::runtime_profiles::TopologyProfile;
 
-// M6 host-policy boundary: keep local ownership defaults explicit; do not add
-// more caller-local knobs without updating plan 038.
+// Keep local ownership defaults explicit.
 pub(crate) const DEFAULT_SCALE_LOCAL_CLIENT_SHARDS: usize = 1;
 pub(crate) const DEFAULT_SCALE_LOCAL_SERVER_WORKERS: usize = 1;
 
@@ -42,19 +41,10 @@ pub(crate) struct RunBackendConfig {
     pub(crate) pin_threads: bool,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct RunStats {
     pub(crate) datagrams: usize,
     pub(crate) max_send_inflight: usize,
-}
-
-impl Default for RunStats {
-    fn default() -> Self {
-        Self {
-            datagrams: 0,
-            max_send_inflight: 0,
-        }
-    }
 }
 
 #[derive(Clone, Debug)]

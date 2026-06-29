@@ -3,8 +3,16 @@ name = "dataplane-rp2040-noalloc-smoke"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "dataplane-rp2040-noalloc-smoke"
+path = "src/main.rs"
+required-features = ["bare-metal-bin"]
+test = false
+bench = false
+
 [features]
 default = []
+bare-metal-bin = []
 
 [target.'cfg(target_os = "none")'.dependencies]
 cortex-m = "0.7"

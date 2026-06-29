@@ -1,13 +1,9 @@
 use crate::block_runtime::copy_block_sector_to_fs;
-#[cfg(feature = "fat32-write-proof")]
-use crate::block_runtime::copy_fs_sector_to_block;
 use crate::fat32::{
     Fat32Layout, FsError, FsFileHandle, FsFileStat, FsKnownPath, FsNegativeCase, FsReadResult,
     FsRejection, FsRootListing, FsServiceReply, FsServiceRequest, FsTask, RootDirectoryProof,
     FAT32_HELLO_CONTENT, FAT32_INDEX_CONTENT, FAT32_LARGE_CONTENT_BYTES,
 };
-#[cfg(feature = "fat32-write-proof")]
-use crate::fat32::{FAT32_OUT_CLUSTER, FAT32_OUT_CONTENT, FAT32_OUT_NAME};
 use crate::http::HttpTask;
 use crate::kernel_ledgers::{
     emit_combined_cap_degradation_ledger, emit_protocol_input_bounds_ledger,

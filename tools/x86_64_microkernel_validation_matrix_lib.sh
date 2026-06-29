@@ -34,11 +34,11 @@ dp_extract_artifact() {
   line=""
   while IFS= read -r candidate; do
     case "$candidate" in
-      "$label":\ /*) line="$candidate" ;;
+      "$label":\ /*)
+        line="$candidate"
+        matches=$((matches + 1))
+        ;;
     esac
-    if [[ "$line" == "$candidate" ]]; then
-      matches=$((matches + 1))
-    fi
   done <"$log_file" || return 1
   if [[ "$matches" -ne 1 ]]; then
     return 1

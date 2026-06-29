@@ -24,10 +24,7 @@ pub(super) fn poll_release_reset(
     task.state = UsbEthernetState::WaitEnabled;
 }
 
-pub(super) fn poll_wait_enabled(
-    task: &mut UsbEthernetTask,
-    _region: &mut [u8; SHARD_REGION_SIZE],
-) {
+pub(super) fn poll_wait_enabled(task: &mut UsbEthernetTask, _region: &mut [u8; SHARD_REGION_SIZE]) {
     task.hprt = read_reg(HPRT);
     if task.hprt & (HPRT_CONN | HPRT_ENABLE) == (HPRT_CONN | HPRT_ENABLE) {
         task.state = UsbEthernetState::StartDescriptorSetup;

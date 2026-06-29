@@ -1,3 +1,5 @@
+use std::cmp::Reverse;
+
 use quanta::Clock;
 
 #[derive(Clone, Copy, Default)]
@@ -78,18 +80,14 @@ impl StepStats {
             total_ns as f64 / 1_000_000.0
         );
         let mut rows = self.rows.clone();
-        rows.sort_by(|a, b| b.1.total_ns.cmp(&a.1.total_ns));
+        rows.sort_by_key(|row| Reverse(row.1.total_ns));
         for (step, agg) in rows {
             let pct = if total_ns == 0 {
                 0.0
             } else {
                 (agg.total_ns as f64 * 100.0) / total_ns as f64
             };
-            let avg_ns = if agg.count == 0 {
-                0
-            } else {
-                agg.total_ns / agg.count
-            };
+            let avg_ns = agg.total_ns.checked_div(agg.count).unwrap_or(0);
             println!(
                 "step_stats bench={} step={} count={} total_ms={:.3} avg_ns={} max_ns={} pct={:.2}",
                 bench,

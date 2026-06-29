@@ -42,7 +42,6 @@ macro_rules! stats_add_max {
 }
 
 pub(crate) use stats_add;
-pub(crate) use stats_add_max;
 pub(crate) use stats_inc;
 pub(crate) use stats_max;
 

@@ -181,7 +181,7 @@ reject_literal "$runner" 'sock.sendall(b"help\n")' \
 reject_literal "$runner" 'curl -k' \
   "FAT32 smoke runner must not use insecure HTTPS/TLS shortcuts"
 reject_literal "$kernel" 'DPCLI:ROUTES routes=' \
-  "FAT32 smoke guard must not require the later service-route-table packet"
+  "FAT32 smoke guard must not require route table output"
 reject_literal "$kernel" 'DPCLI:STATUS-BEGIN' \
   "FAT32 smoke guard must not require the later status snapshot packet"
 reject_literal "$kernel" 'DPCLI:FAULTS timer=' \

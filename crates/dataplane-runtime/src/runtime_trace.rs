@@ -164,11 +164,10 @@ impl DebugPhaseStats {
         }
         let total_ns: u64 = self.phase_ns.iter().copied().sum();
         let pct = |phase: LoopPhase| -> u64 {
-            if total_ns == 0 {
-                0
-            } else {
-                (self.phase_ns[phase.idx()] * 100) / total_ns
-            }
+            self.phase_ns[phase.idx()]
+                .saturating_mul(100)
+                .checked_div(total_ns)
+                .unwrap_or(0)
         };
         eprintln!(
             "{} shard={} mode={} sqpoll={} pending_cmds={} ready={} write_ready={} queued_sqes={} latency_inflight={} main_inflight={} progress_loops={} no_progress_loops={} stall_idle={} stall_wait_main={} stall_wait_latency={} stall_spin={} pct(drain/cqe_l/cqe_m/reduce/ready/submit/wm/wl/spin)={}/{}/{}/{}/{}/{}/{}/{}/{}",

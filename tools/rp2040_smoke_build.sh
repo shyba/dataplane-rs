@@ -14,5 +14,5 @@ if [[ ! -f "$crate_path" ]]; then
   exit 1
 fi
 
-cargo build -p dataplane-rp2040-smoke --target "$target" --release
+cargo build -p dataplane-rp2040-smoke --target "$target" --release --features bare-metal-bin
 echo "RP2040 smoke build passed."

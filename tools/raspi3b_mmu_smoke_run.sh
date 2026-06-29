@@ -56,7 +56,14 @@ if [[ ! -S "$uart_sock" ]]; then
   exit 1
 fi
 
-coproc UART { socat - "UNIX-CONNECT:$uart_sock" 2>>"$qemu_log"; }
+if command -v socat >/dev/null 2>&1; then
+  coproc UART { socat - "UNIX-CONNECT:$uart_sock" 2>>"$qemu_log"; }
+elif command -v nc >/dev/null 2>&1; then
+  coproc UART { nc -U "$uart_sock" 2>>"$qemu_log"; }
+else
+  echo "FAIL: neither socat nor nc is available for the Raspi3B VM UART socket"
+  exit 1
+fi
 uart_pid="$UART_PID"
 
 printf 'DPHOST?\n' >&"${UART[1]}"

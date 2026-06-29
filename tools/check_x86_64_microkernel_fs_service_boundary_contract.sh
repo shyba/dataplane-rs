@@ -4,13 +4,12 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 kernel="crates/dataplane-x86_64-microkernel-smoke/src/kernel.rs"
-scenarios="crates/dataplane-x86_64-microkernel-smoke/src/scenarios.rs"
+scenarios="crates/dataplane-x86_64-microkernel-smoke/src/scenarios/common.rs"
 fat32="crates/dataplane-x86_64-microkernel-smoke/src/fat32.rs"
 http="crates/dataplane-x86_64-microkernel-smoke/src/http.rs"
 services="crates/dataplane-x86_64-microkernel-smoke/src/services.rs"
 runner="tools/x86_64_microkernel_fat32_run.sh"
 makefile="Makefile"
-note="changes/__archived_changes_2026-05-31/x86_64-microkernel-fs-service-boundary/specs/fs-service-boundary/spec.md"
 
 fail() {
   echo "FAIL: $*" >&2
@@ -39,7 +38,7 @@ reject_literal() {
 
 echo "=== x86_64 Microkernel FS Service Boundary Contract Guard ==="
 
-for file in "$kernel" "$scenarios" "$fat32" "$http" "$services" "$runner" "$makefile" "$note"; do
+for file in "$kernel" "$scenarios" "$fat32" "$http" "$services" "$runner" "$makefile"; do
   require_file "$file"
 done
 
@@ -103,10 +102,5 @@ require_literal "$makefile" './tools/check_x86_64_microkernel_fs_service_boundar
   "Makefile must wire the fs service boundary contract guard"
 require_literal "$makefile" 'x86_64-microkernel-fs-service-boundary: guard-scripts-executable x86_64-microkernel-fat32-smoke-build x86_64-microkernel-fat32-contract x86_64-microkernel-fs-service-boundary-contract' \
   "Makefile must gate the proof on the fs service boundary contract"
-
-require_literal "$note" '### Requirement: Prove multi-cluster reads' \
-  "spec must keep the multi-cluster requirement"
-require_literal "$note" 'The system SHALL prove a multi-cluster read path' \
-  "spec must keep the multi-cluster requirement wording"
 
 echo "x86_64 microkernel FS service boundary contract OK"

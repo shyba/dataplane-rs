@@ -6,7 +6,6 @@ applications/erlang/ranch_uring/priv/*.so
 erl_crash.dump
 *.beam
 .rebar3/
-aidocs/
 .codex-review-session
 .codex
 .session_id

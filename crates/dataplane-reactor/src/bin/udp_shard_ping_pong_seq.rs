@@ -5,8 +5,7 @@ use std::time::Instant;
 
 use dataplane_runtime::runtime_topology::{pin_current_to_cpu, TopologyProfile};
 
-// M6 host-policy boundary: keep local ownership defaults explicit; do not add
-// more caller-local knobs without updating plan 038.
+// Keep local ownership defaults explicit.
 const DEFAULT_SEQ_LOCAL_CLIENT_SHARDS: usize = 1;
 const DEFAULT_SEQ_LOCAL_WORKER_SHARDS: usize = 3;
 

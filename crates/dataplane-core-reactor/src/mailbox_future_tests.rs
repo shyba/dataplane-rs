@@ -781,7 +781,6 @@ fn take_ready_without_mutex_in_poll_path() {
 // ========================================================================
 
 // ========================================================================
-// DP-CS-0093: update aidocs/039 CR-5 status
 // Finding CR-5: "confirm RemoteTaskResult is not per-message. If it is, pool it."
 // Evidence: RemoteTaskResult is allocated once per spawn (Arc::new in
 // oneshot_reserved_at), not per message/poll. This is intentional — each

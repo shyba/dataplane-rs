@@ -57,7 +57,6 @@ fairness_artifact_dir="$(dp_artifact_path "$log_root" "x86_64-microkernel-fat32"
 scheduler_fairness_summary="$log_dir/x86_64-microkernel-fat32-$run_id.scheduler-fairness-load.summary"
 control_protocol_v1_summary="$(dp_artifact_path "$log_root" "x86_64-microkernel-fat32" "$run_id" "control-protocol-v1.summary")"
 fault_policy_hardening_summary="$(dp_artifact_path "$log_root" "x86_64-microkernel-fat32" "$run_id" "fault-policy-hardening.summary")"
-timer_timeout_service_summary="$log_root/x86_64-microkernel-fat32-$run_id.timer-timeout-service.summary"
 network_counter_audit_summary="$log_dir/x86_64-microkernel-fat32-$run_id.network-counter-audit.summary"
 dhcp_log="$(dp_artifact_path "$log_root" "x86_64-microkernel-fat32" "$run_id" "dhcp.log")"
 dhcp_lease_evidence="$(dp_artifact_path "$log_root" "x86_64-microkernel-fat32" "$run_id" "dhcp-lease.json")"
@@ -163,15 +162,12 @@ fi
 if [[ "${DP_MICROKERNEL_CLI_OPERATOR_SURFACE_POLISH_PROOF:-0}" == "1" ]]; then
   mode="--cli-operator-surface-polish-proof"
 fi
-if [[ "${DP_MICROKERNEL_TIMER_TIMEOUT_SERVICE_PROOF:-0}" == "1" ]]; then
-  mode="--timer-timeout-service-proof"
-fi
 
 # Control-protocol-v1 host harness uses fixed scenario plumbing and artifact validation; the guest owns protocol semantics and state transitions.
 
-if [[ "$mode" != "" && "$mode" != "--raw" && "$mode" != "--curl-proof" && "$mode" != "--http-static-appliance-polish-proof" && "$mode" != "--nontls-network-service-proof" && "$mode" != "--nontls-network-negative-matrix-proof" && "$mode" != "--fairness-proof" && "$mode" != "--scheduler-fairness-load-proof" && "$mode" != "--control-protocol-v1-proof" && "$mode" != "--fault-policy-hardening-proof" && "$mode" != "--dhcp-proof" && "$mode" != "--write-proof" && "$mode" != "--preallocated-journal-file-proof" && "$mode" != "--bounded-tcp-negative-proof" && "$mode" != "--http-backpressure-proof" && "$mode" != "--fs-service-boundary-proof" && "$mode" != "--fs-policy-and-directory-slice-proof" && "$mode" != "--operator-appliance-surface-proof" && "$mode" != "--storage-service-counters-proof" && "$mode" != "--cli-http-operator-parity-proof" && "$mode" != "--cli-operator-surface-polish-proof" && "$mode" != "--timer-timeout-service-proof" ]]; then
+if [[ "$mode" != "" && "$mode" != "--raw" && "$mode" != "--curl-proof" && "$mode" != "--http-static-appliance-polish-proof" && "$mode" != "--nontls-network-service-proof" && "$mode" != "--nontls-network-negative-matrix-proof" && "$mode" != "--fairness-proof" && "$mode" != "--scheduler-fairness-load-proof" && "$mode" != "--control-protocol-v1-proof" && "$mode" != "--fault-policy-hardening-proof" && "$mode" != "--dhcp-proof" && "$mode" != "--write-proof" && "$mode" != "--preallocated-journal-file-proof" && "$mode" != "--bounded-tcp-negative-proof" && "$mode" != "--http-backpressure-proof" && "$mode" != "--fs-service-boundary-proof" && "$mode" != "--fs-policy-and-directory-slice-proof" && "$mode" != "--operator-appliance-surface-proof" && "$mode" != "--storage-service-counters-proof" && "$mode" != "--cli-http-operator-parity-proof" && "$mode" != "--cli-operator-surface-polish-proof" ]]; then
   echo "FAIL: unknown mode: $mode"
-  echo "usage: $0 [--raw|--curl-proof|--http-static-appliance-polish-proof|--nontls-network-service-proof|--nontls-network-negative-matrix-proof|--fairness-proof|--scheduler-fairness-load-proof|--control-protocol-v1-proof|--fault-policy-hardening-proof|--dhcp-proof|--write-proof|--preallocated-journal-file-proof|--bounded-tcp-negative-proof|--http-backpressure-proof|--fs-service-boundary-proof|--fs-policy-and-directory-slice-proof|--operator-appliance-surface-proof|--storage-service-counters-proof|--cli-http-operator-parity-proof|--cli-operator-surface-polish-proof|--timer-timeout-service-proof]"
+  echo "usage: $0 [--raw|--curl-proof|--http-static-appliance-polish-proof|--nontls-network-service-proof|--nontls-network-negative-matrix-proof|--fairness-proof|--scheduler-fairness-load-proof|--control-protocol-v1-proof|--fault-policy-hardening-proof|--dhcp-proof|--write-proof|--preallocated-journal-file-proof|--bounded-tcp-negative-proof|--http-backpressure-proof|--fs-service-boundary-proof|--fs-policy-and-directory-slice-proof|--operator-appliance-surface-proof|--storage-service-counters-proof|--cli-http-operator-parity-proof|--cli-operator-surface-polish-proof]"
   exit 2
 fi
 
@@ -1423,12 +1419,18 @@ if [[ "$mode" == "--fs-policy-and-directory-slice-proof" ]]; then
 fi
 
 if [[ "$mode" == "--operator-appliance-surface-proof" ]]; then
-  operator_source="crates/dataplane-x86_64-microkernel-smoke/src/main.rs"
+  operator_sources=(
+    "crates/dataplane-x86_64-microkernel-smoke/src/cli.rs"
+    "crates/dataplane-x86_64-microkernel-smoke/src/kernel.rs"
+    "crates/dataplane-x86_64-microkernel-smoke/src/network_task/task.rs"
+    "crates/dataplane-x86_64-microkernel-smoke/src/network_task/protocol_tcp_http.rs"
+    "crates/dataplane-x86_64-microkernel-smoke/src/scenarios/cli_operator.rs"
+  )
   source_scan_note="$log_dir/x86_64-microkernel-fat32-$run_id.operator-appliance-surface.source-scan.note"
   rm -f "$operator_appliance_surface_summary" "$operator_appliance_surface_source_scan" "$source_scan_note"
   {
     echo "=== operator appliance surface source scan ==="
-    rg -n -C 1 'DPCLI:STAT|readonly=1|active_sessions|too_many_sessions|DPMK:TCP-CTRL-SESSION-FULL|DPMK:TCP-CTRL-FIN-DURING-RESPONSE|DPMK:CLI-OPERATOR-OK' "$operator_source"
+    rg -n -C 1 'DPCLI:TASK |DPCLI:TASKS|DPCLI:STAT|readonly=1|active_sessions|too_many_sessions|DPMK:TCP-CTRL-SESSION-FULL|DPMK:TCP-CTRL-FIN-DURING-RESPONSE|DPMK:CLI-OPERATOR-OK' "${operator_sources[@]}"
   } >"$operator_appliance_surface_source_scan"
   cat >"$operator_appliance_surface_summary" <<EOF
 operator_appliance_surface_proof_kind=source_scan
@@ -5079,136 +5081,6 @@ if [[ "$mode" == "--network-counter-audit-proof" ]]; then
   } >"$network_counter_audit_summary"
 fi
 
-if [[ "$mode" == "--timer-timeout-service-proof" ]]; then
-  # timer_service_owner=1
-  # timer_tick_source=cooperative-run_timer_tick
-  # timer_timeout_resolution_ticks=8
-  # timer_wrap_policy=wrap-saturating
-  # timer_max_observed_gap_ticks=32
-  # timer_stale_timeout_behavior=bounded-drop
-  # timer_expired_timeout_behavior=reject
-  # timer_positive_control_case=bounded-delivery
-  # timer_timeout_service_positive_delivery_ok=true
-  # timer_timeout_service_stale_timeout_ok=true
-  # timer_timeout_service_expired_timeout_ok=true
-  # timer_timeout_service_timer_owner_visible=true
-  # timer_timeout_service_tick_source_visible=true
-  timer_owner_line="$(grep -F "DPTIMER:owner task=" "$serial_log" | head -n 1 || true)"
-  timer_source_line="$(grep -F "DPTIMER:source " "$serial_log" | head -n 1 || true)"
-  timer_delivery_line="$(grep -F "DPTIMER:delivery " "$serial_log" | head -n 1 || true)"
-  timer_positive_line="$(grep -F "DPTIMER:positive-delivery " "$serial_log" | head -n 1 || true)"
-  timer_stale_line="$(grep -F "DPTIMER:stale-timeout " "$serial_log" | head -n 1 || true)"
-  timer_expired_line="$(grep -F "DPTIMER:expired-timeout " "$serial_log" | head -n 1 || true)"
-  timer_wrap_line="$(grep -F "DPTIMER:wrap-comparison " "$serial_log" | head -n 1 || true)"
-  timer_gap_line="$(grep -F "DPTIMER:gap-bounds " "$serial_log" | head -n 1 || true)"
-  timer_owner="$(printf '%s\n' "$timer_owner_line" | sed -n 's/.*owner task=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_tick_source="$(printf '%s\n' "$timer_source_line" | sed -n 's/.*source \([^ ]*\).*/\1/p' | head -n 1)"
-  timer_timeout_resolution_ticks="$(printf '%s\n' "$timer_delivery_line" | sed -n 's/.*timeout_resolution_ticks=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_positive_now="$(printf '%s\n' "$timer_positive_line" | sed -n 's/.* now=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_positive_deadline="$(printf '%s\n' "$timer_positive_line" | sed -n 's/.* deadline=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_positive_age="$(printf '%s\n' "$timer_positive_line" | sed -n 's/.* age=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_positive_grace="$(printf '%s\n' "$timer_positive_line" | sed -n 's/.* grace=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_positive_control="$(printf '%s\n' "$timer_positive_line" | sed -n 's/.* control=\([^ ]*\).*/\1/p' | head -n 1)"
-  timer_positive_outcome="$(printf '%s\n' "$timer_positive_line" | sed -n 's/.* outcome=\([^ ]*\).*/\1/p' | head -n 1)"
-  timer_stale_now="$(printf '%s\n' "$timer_stale_line" | sed -n 's/.* now=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_stale_deadline="$(printf '%s\n' "$timer_stale_line" | sed -n 's/.* deadline=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_stale_age="$(printf '%s\n' "$timer_stale_line" | sed -n 's/.* age=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_stale_grace="$(printf '%s\n' "$timer_stale_line" | sed -n 's/.* grace=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_stale_outcome="$(printf '%s\n' "$timer_stale_line" | sed -n 's/.* outcome=\([^ ]*\).*/\1/p' | head -n 1)"
-  timer_stale_retries="$(printf '%s\n' "$timer_stale_line" | sed -n 's/.* stale_timeout_retries=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_stale_rejects="$(printf '%s\n' "$timer_stale_line" | sed -n 's/.* stale_timeout_rejects=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_expired_now="$(printf '%s\n' "$timer_expired_line" | sed -n 's/.* now=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_expired_deadline="$(printf '%s\n' "$timer_expired_line" | sed -n 's/.* deadline=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_expired_age="$(printf '%s\n' "$timer_expired_line" | sed -n 's/.* age=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_expired_grace="$(printf '%s\n' "$timer_expired_line" | sed -n 's/.* grace=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_expired_outcome="$(printf '%s\n' "$timer_expired_line" | sed -n 's/.* outcome=\([^ ]*\).*/\1/p' | head -n 1)"
-  timer_expired_rejects="$(printf '%s\n' "$timer_expired_line" | sed -n 's/.* expired_timeout_rejects=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_expired_ignored="$(printf '%s\n' "$timer_expired_line" | sed -n 's/.* expired_timeout_ignored=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_wrap_policy="$(printf '%s\n' "$timer_wrap_line" | sed -n 's/.* wrap_policy=\([^ ]*\).*/\1/p' | head -n 1)"
-  timer_wrap_now="$(printf '%s\n' "$timer_wrap_line" | sed -n 's/.* now=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_wrap_deadline="$(printf '%s\n' "$timer_wrap_line" | sed -n 's/.* deadline=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_wrap_age="$(printf '%s\n' "$timer_wrap_line" | sed -n 's/.* age=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_max_observed_gap_ticks="$(printf '%s\n' "$timer_gap_line" | sed -n 's/.*observed=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  timer_gap_fairness="$(printf '%s\n' "$timer_gap_line" | sed -n 's/.* fairness=\([0-9][0-9]*\).*/\1/p' | head -n 1)"
-  {
-    echo "timer_service_owner=$timer_owner"
-    echo "timer_tick_source=$timer_tick_source"
-    echo "timer_timeout_resolution_ticks=$timer_timeout_resolution_ticks"
-    echo "timer_wrap_policy=$timer_wrap_policy"
-    echo "timer_max_observed_gap_ticks=$timer_max_observed_gap_ticks"
-    echo "timer_gap_fairness=$timer_gap_fairness"
-    echo "timer_stale_timeout_behavior=$timer_stale_outcome"
-    echo "timer_expired_timeout_behavior=$timer_expired_outcome"
-    echo "timer_positive_control_case=$timer_positive_control"
-    echo "timer_timeout_service_summary_status=pass"
-    echo "timer_timeout_service_summary=$timer_timeout_service_summary"
-    echo "timer_timeout_service_serial_log=$serial_log"
-    echo "timer_timeout_service_qemu_log=$qemu_log"
-    echo "timer_timeout_service_client_log=$client_log"
-    echo "timer_timeout_service_network_pcap=$net_pcap"
-    echo "timer_timeout_service_timer_owner_visible=$(grep -q 'DPTIMER:owner task=' "$serial_log" && echo true || echo false)"
-    echo "timer_timeout_service_tick_source_visible=$(grep -q 'DPTIMER:source cooperative-run_timer_tick' "$serial_log" && echo true || echo false)"
-    echo "timer_timeout_service_positive_delivery_ok=$( [ "$timer_positive_control" = "bounded" ] && [ "$timer_positive_outcome" = "deliver" ] && [ -n "$timer_positive_now" ] && [ -n "$timer_positive_deadline" ] && [ -n "$timer_positive_age" ] && [ -n "$timer_positive_grace" ] && [ "$timer_positive_age" -le "$timer_positive_grace" ] && [ "$timer_timeout_resolution_ticks" = "8" ] && [ "$timer_wrap_policy" = "wrap-saturating" ] && echo true || echo false)"
-    echo "timer_timeout_service_stale_timeout_ok=$( [ "$timer_stale_outcome" = "bounded-drop" ] && [ -n "$timer_stale_now" ] && [ -n "$timer_stale_deadline" ] && [ -n "$timer_stale_age" ] && [ -n "$timer_stale_grace" ] && [ "$timer_stale_age" -gt "$timer_stale_grace" ] && [ "$timer_stale_retries" = "0" ] && [ "$timer_stale_rejects" = "1" ] && echo true || echo false)"
-    echo "timer_timeout_service_expired_timeout_ok=$( [ "$timer_expired_outcome" = "reject" ] && [ -n "$timer_expired_now" ] && [ -n "$timer_expired_deadline" ] && [ -n "$timer_expired_age" ] && [ -n "$timer_expired_grace" ] && [ "$timer_expired_age" -gt "$timer_expired_grace" ] && [ "$timer_expired_rejects" = "1" ] && [ "$timer_expired_ignored" = "1" ] && echo true || echo false)"
-  } >"$timer_timeout_service_summary"
-  python3 - "$timer_timeout_service_summary" <<'PY'
-import sys
-
-path = sys.argv[1]
-seen = set()
-values = {}
-for line in open(path, "r", encoding="ascii"):
-    key, value = line.rstrip("\n").split("=", 1)
-    if key in seen:
-        raise SystemExit(f"duplicate summary key: {key}")
-    seen.add(key)
-    values[key] = value
-
-required = {
-    "timer_timeout_service_summary_status": "pass",
-    "timer_positive_control_case": "bounded",
-    "timer_wrap_policy": "wrap-saturating",
-    "timer_stale_timeout_behavior": "bounded-drop",
-    "timer_expired_timeout_behavior": "reject",
-    "timer_timeout_service_timer_owner_visible": "true",
-    "timer_timeout_service_tick_source_visible": "true",
-    "timer_timeout_service_positive_delivery_ok": "true",
-    "timer_timeout_service_stale_timeout_ok": "true",
-    "timer_timeout_service_expired_timeout_ok": "true",
-}
-for key, expected in required.items():
-    if values.get(key) != expected:
-        raise SystemExit(f"missing {key}={expected}")
-
-for key in (
-    "timer_service_owner",
-    "timer_tick_source",
-    "timer_timeout_resolution_ticks",
-    "timer_max_observed_gap_ticks",
-    "timer_gap_fairness",
-    "timer_timeout_service_summary",
-    "timer_timeout_service_serial_log",
-    "timer_timeout_service_qemu_log",
-):
-    if not values.get(key):
-        raise SystemExit(f"missing non-empty {key}")
-
-if int(values["timer_max_observed_gap_ticks"]) > int(values["timer_gap_fairness"]):
-    raise SystemExit("observed gap exceeds fairness window")
-
-for key in (
-    "timer_timeout_service_summary",
-    "timer_timeout_service_serial_log",
-    "timer_timeout_service_qemu_log",
-    "timer_timeout_service_client_log",
-    "timer_timeout_service_network_pcap",
-):
-    if not values[key].startswith("/home/user/mnt/dataplane/logs/"):
-        raise SystemExit(f"{key} not under /home/user/mnt/dataplane/logs: {values[key]}")
-PY
-fi
-
 if [[ "$mode" == "--cli-http-operator-parity-proof" ]]; then
   python3 - "$serial_log" "$host_exchange_log" "$parity_cli_transcript" "$parity_http_body" "$parity_http_headers" \
     "$parity_http_status" "$parity_cap_negative_body" "$parity_cap_negative_headers" "$parity_cap_negative_status" \
@@ -5339,10 +5211,6 @@ fi
 if [[ "$mode" == "--network-counter-audit-proof" ]]; then
   echo "x86_64 microkernel network counter audit proof passed."
   echo "network counter audit summary: $network_counter_audit_summary"
-fi
-if [[ "$mode" == "--timer-timeout-service-proof" ]]; then
-  echo "x86_64 microkernel timer timeout service proof passed."
-  echo "timer timeout service summary: $timer_timeout_service_summary"
 fi
 if [[ "$mode" == "--cli-operator-surface-polish-proof" ]]; then
   echo "x86_64 microkernel CLI operator surface polish proof passed."

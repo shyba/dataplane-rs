@@ -3,8 +3,16 @@ name = "dataplane-raspi3b-mmu-smoke"
 version = "0.1.0"
 edition = "2021"
 
+[[bin]]
+name = "dataplane-raspi3b-mmu-smoke"
+path = "src/main.rs"
+required-features = ["bare-metal-bin"]
+test = false
+bench = false
+
 [features]
 default = []
+bare-metal-bin = []
 
 [dependencies]
 dataplane-microkernel-core = { path = "../dataplane-microkernel-core" }

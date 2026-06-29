@@ -81,7 +81,7 @@ impl KernelState {
     #[cfg(feature = "fat32-write-proof")]
     pub(crate) fn run_fat32_write_probe(&mut self) -> Result<(), &'static str> {
         let layout = self.load_fat32_layout()?;
-        if layout.sectors_per_cluster != 1 {
+        if layout.sectors_per_cluster() != 1 {
             return Err("fat32-write-cluster-shape");
         }
 

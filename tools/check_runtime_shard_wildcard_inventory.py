@@ -47,7 +47,6 @@ from collections import defaultdict
 REPO_ROOT = Path(__file__).parent.parent.resolve()
 RUNTIME_SHARD = REPO_ROOT / "applications/erlang/ranch_uring/native/src/runtime_shard.rs"
 RUNTIME = REPO_ROOT / "applications/erlang/ranch_uring/native/src/runtime.rs"
-AIDOCS = REPO_ROOT / "aidocs"
 OUTPUT_DIR = REPO_ROOT / "target" / "wildcard_inventory"
 
 

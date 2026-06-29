@@ -4,7 +4,11 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
-main="crates/dataplane-x86_64-microkernel-smoke/src/main.rs"
+cli="crates/dataplane-x86_64-microkernel-smoke/src/cli.rs"
+kernel="crates/dataplane-x86_64-microkernel-smoke/src/kernel.rs"
+network_task="crates/dataplane-x86_64-microkernel-smoke/src/network_task/task.rs"
+network_protocol="crates/dataplane-x86_64-microkernel-smoke/src/network_task/protocol_tcp_http.rs"
+scenario="crates/dataplane-x86_64-microkernel-smoke/src/scenarios/cli_operator.rs"
 runner="tools/x86_64_microkernel_fat32_run.sh"
 manifest="crates/dataplane-x86_64-microkernel-smoke/Cargo.toml"
 workspace_manifest="Cargo.toml"
@@ -93,7 +97,11 @@ require_list_literal() {
   [[ "$body" == *"$needle"* ]] || fail "$note"
 }
 
-require_file "$main" "missing x86_64 microkernel guest source"
+require_file "$cli" "missing x86_64 microkernel CLI source"
+require_file "$kernel" "missing x86_64 microkernel kernel source"
+require_file "$network_task" "missing x86_64 microkernel network task source"
+require_file "$network_protocol" "missing x86_64 microkernel TCP protocol source"
+require_file "$scenario" "missing x86_64 microkernel CLI operator scenario source"
 require_file "$runner" "missing x86_64 microkernel FAT32 runner"
 require_file "$manifest" "missing x86_64 microkernel Cargo manifest"
 require_file "$workspace_manifest" "missing workspace Cargo manifest"
@@ -113,18 +121,22 @@ for symbol in \
   "enqueued=" \
   "dequeued=" \
   "DPMK:CLI-OPERATOR-OK"; do
-  require_literal "$main" "$symbol" "guest must keep the bounded operator surface literal: $symbol"
+  require_literal "$cli" "$symbol" "guest must keep the bounded operator surface literal: $symbol"
 done
 
 echo "Checking operator appliance proof summary keys..."
-require_literal "$main" 'DPCLI:STAT ' \
+require_literal "$kernel" 'DPCLI:STAT ' \
   "guest source must emit the filesystem stat prefix used by the source-scan summary"
-require_literal "$main" 'readonly=1' \
+require_literal "$kernel" 'readonly=1' \
   "guest source must emit the read-only filesystem field used by the source-scan summary"
-require_literal "$main" 'active_sessions' \
-  "guest source must track active session counts used by the source-scan summary"
-require_literal "$main" 'too_many_sessions' \
+require_literal "$network_task" 'too_many_sessions' \
   "guest source must track session overflow counts used by the source-scan summary"
+require_literal "$network_task" 'active_sessions' \
+  "guest source must track active session counts used by the source-scan summary"
+require_literal "$network_protocol" 'active_sessions' \
+  "guest source must track active session counts used by the source-scan summary"
+require_literal "$scenario" 'DPMK:CLI-OPERATOR-OK' \
+  "guest scenario must keep the operator appliance proof marker"
 require_literal "$runner" '--operator-appliance-surface-proof' \
   "runner must dispatch operator appliance proof mode"
 require_literal "$runner" 'operator_appliance_surface_proof_kind=source_scan' \
@@ -147,7 +159,7 @@ require_literal "$matrix_runner" "operator-appliance-surface) echo 'make x86_64-
   "matrix runner must dispatch the operator appliance scenario through Make"
 require_literal "$matrix_runner" "operator-appliance-surface) echo 'x86_64 microkernel operator appliance source-scan proof passed.' ;;" \
   "matrix runner must require the operator appliance source-scan marker"
-require_literal "$matrix_runner" "operator-appliance-surface) echo 'summary|source scan' ;;" \
+require_literal "$matrix_runner" "operator-appliance-surface) echo 'operator appliance surface summary|operator appliance surface source scan' ;;" \
   "matrix runner must require the source-scan artifacts"
 
 echo "Checking Makefile wiring..."
@@ -159,7 +171,11 @@ require_literal "$makefile" 'x86_64-microkernel-operator-appliance-surface: guar
   "Makefile must expose the operator appliance proof target"
 
 echo "Checking guarded source constraints..."
-reject_literal "$main" "DPMK:HTTP-STATUS-PAGE-OK" \
+reject_literal "$cli" "DPMK:HTTP-STATUS-PAGE-OK" \
+  "operator appliance surface guard must not claim an HTTP status page proof that the guest does not emit"
+reject_literal "$kernel" "DPMK:HTTP-STATUS-PAGE-OK" \
+  "operator appliance surface guard must not claim an HTTP status page proof that the guest does not emit"
+reject_literal "$scenario" "DPMK:HTTP-STATUS-PAGE-OK" \
   "operator appliance surface guard must not claim an HTTP status page proof that the guest does not emit"
 reject_literal "$runner" 'operator_appliance_surface_sources=cli_ipc,service_http' \
   "runner must not claim service_http sourcing after narrowing to source-scan proof"

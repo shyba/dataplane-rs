@@ -171,9 +171,8 @@ where
         &mut self,
         wake_token: BalancedWakeToken,
     ) -> Result<BalancedParkLease, EmbeddedResourceError> {
-        // DP-EMB-0028 boundary decision: keep timer-capacity propagation narrow.
-        // The active 038 plan defers any host-loop timer wrapper until a real
-        // caller requires a typed timer-allocation path.
+        // Keep timer-capacity propagation narrow until a caller needs a typed
+        // timer-allocation path.
         self.handle.try_arm_embedded_park(wake_token)
     }
 }

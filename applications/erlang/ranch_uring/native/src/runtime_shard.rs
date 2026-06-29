@@ -1280,7 +1280,7 @@ impl ShardState {
                 }
                 drained += 1;
                 if drained == COMMAND_BUDGET {
-                    deferred_commands.extend(batch.into_iter());
+                    deferred_commands.extend(batch);
                     break;
                 }
             }

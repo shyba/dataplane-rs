@@ -698,6 +698,11 @@ impl Fat32Layout {
     pub(crate) fn root_sector(self) -> u32 {
         self.cluster_sector(self.root_cluster)
     }
+
+    #[cfg(feature = "fat32-write-proof")]
+    pub(crate) fn sectors_per_cluster(self) -> u32 {
+        self.sectors_per_cluster
+    }
 }
 
 #[derive(Clone, Copy)]

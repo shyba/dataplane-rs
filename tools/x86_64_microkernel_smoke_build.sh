@@ -19,10 +19,11 @@ if [[ ! -d "$crate" ]]; then
   exit 1
 fi
 
-features_args=()
+features="bare-metal-bin"
 if [[ -n "${X86_64_MICROKERNEL_FEATURES:-}" ]]; then
-  features_args+=(--features "$X86_64_MICROKERNEL_FEATURES")
+  features="$features,${X86_64_MICROKERNEL_FEATURES}"
 fi
+features_args=(--features "$features")
 
 RUSTFLAGS="-C relocation-model=static -C link-arg=-no-pie -C link-arg=-Tlayout.ld" \
   cargo build -p dataplane-x86_64-microkernel-smoke --target "$target" --release "${features_args[@]}"
