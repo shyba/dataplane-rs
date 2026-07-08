@@ -22,6 +22,12 @@ rp2040-integration = [
     "dep:dataplane-core-reactor",
     "dataplane-core-reactor/rp2040-compile",
 ]
+rp2040-hil-recovery = ["dep:rp2040-hal"]
+rp2040-usb-auto-bootsel = [
+    "rp2040-hil-recovery",
+    "dep:usb-device",
+    "dep:usbd-serial",
+]
 rp2040-noalloc = ["noalloc"]
 erlang-nif = ["host-runtime", "dep:crossbeam-channel", "dep:rustler"]
 
@@ -35,6 +41,11 @@ crossbeam-channel = { version = "0.5", optional = true }
 embedded-hal = { version = "1", optional = true }
 dataplane-core-reactor = { path = "../dataplane-core-reactor", default-features = false, optional = true }
 dataplane-topology = { path = "../dataplane-topology", optional = true }
+
+[target.'cfg(target_os = "none")'.dependencies]
+rp2040-hal = { version = "0.12", optional = true }
+usb-device = { version = "0.3", optional = true }
+usbd-serial = { version = "0.2", optional = true }
 
 [dev-dependencies]
 criterion = "0.5"

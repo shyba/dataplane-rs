@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+crate_path="crates/dataplane-rp2040-scd41-smoke/Cargo.toml"
+target="thumbv6m-none-eabi"
+
+echo "=== RP2040 SCD41 Smoke Build ==="
+
+if [[ ! -f "$crate_path" ]]; then
+  echo "FAIL: expected crate manifest not found: $crate_path"
+  exit 1
+fi
+
+cargo build -p dataplane-rp2040-scd41-smoke --target "$target" --release --features bare-metal-bin
+echo "RP2040 SCD41 smoke build passed."
+

@@ -17,4 +17,5 @@ members = [
     "crates/dataplane-x86_64-virtio-smoke",
     "crates/dataplane-rp2040-smoke",
     "crates/dataplane-rp2040-noalloc-smoke",
+    "crates/dataplane-rp2040-scd41-smoke",
 ]

@@ -36,10 +36,18 @@ pub mod runtime_trace;
 #[cfg(feature = "erlang-nif")]
 pub mod socket;
 
-#[cfg(all(feature = "rp2040-integration", target_os = "none"))]
-pub mod rp2040 {
-    pub use dataplane_core_reactor::{future_task, local_exec, local_exec_counts};
-}
+#[cfg(all(
+    any(
+        feature = "rp2040-integration",
+        feature = "rp2040-hil-recovery",
+        feature = "rp2040-usb-auto-bootsel"
+    ),
+    target_os = "none"
+))]
+pub mod rp2040;
+
+#[cfg(any(test, all(feature = "rp2040-hil-recovery", target_os = "none")))]
+mod rp2040_recovery;
 
 #[cfg(all(
     any(feature = "noalloc", feature = "rp2040-noalloc"),
