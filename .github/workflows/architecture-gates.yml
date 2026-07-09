@@ -1,0 +1,30 @@
+name: Architecture Gates
+
+on:
+  pull_request:
+  push:
+
+jobs:
+  cheap-architecture-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Check compat boundary
+        run: |
+          set -eu
+          ! grep -n '^dataplane-runtime' crates/dataplane-compat/Cargo.toml
+          ! grep -R -n 'use dataplane_runtime\|dataplane_runtime::' crates/dataplane-compat/src
+          cargo check -p dataplane-compat
+          cargo test -p dataplane-compat
+          cargo test -p dataplane-compat-tokio
+      - name: Check reactor library boundary
+        run: |
+          set -eu
+          cargo tree -p dataplane-reactor --edges normal | tee reactor-tree.txt
+          ! grep -q "dataplane-runtime" reactor-tree.txt
+      - name: Check SCD41 recovery shape
+        run: |
+          set -eu
+          ! grep -n "recover_or_initialize.*unwrap_or_else" crates/dataplane-rp2040-scd41-smoke/src/firmware.rs
+          grep -n "storage recovery failed; entering BOOTSEL" crates/dataplane-rp2040-scd41-smoke/src/firmware.rs

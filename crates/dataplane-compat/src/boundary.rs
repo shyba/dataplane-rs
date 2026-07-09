@@ -1,7 +1,33 @@
 use std::future::Future;
 
-use dataplane_runtime::errors::Result;
-use dataplane_runtime::runtime_protocol::{BatchOp, BatchResult};
+pub type BoundaryResult<T> = std::result::Result<T, BoundaryError>;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BoundaryError {
+    Errno(i32),
+    Closed,
+    Timeout,
+    StartupProfileLayout,
+}
+
+impl BoundaryError {
+    pub fn from_errno(errno: i32) -> Self {
+        Self::Errno(errno)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BatchOp {
+    Read { id: u64, len: usize },
+    Write { id: u64, data: Vec<u8> },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BatchResult {
+    Ok,
+    Data(Vec<u8>),
+    Error(BoundaryError),
+}
 
 pub struct SessionBatch {
     pub session_id: u64,
@@ -14,7 +40,7 @@ pub struct BatchReply {
 }
 
 pub trait BoundaryAdapter {
-    type ReplyFuture: Future<Output = Result<BatchReply>> + Send;
+    type ReplyFuture: Future<Output = BoundaryResult<BatchReply>> + Send;
 
     fn submit_batch(&self, batch: SessionBatch) -> Self::ReplyFuture;
 }
@@ -33,7 +59,7 @@ mod surface_guard {
     struct DummyAdapter;
 
     impl BoundaryAdapter for DummyAdapter {
-        type ReplyFuture = std::future::Ready<Result<BatchReply>>;
+        type ReplyFuture = std::future::Ready<BoundaryResult<BatchReply>>;
 
         fn submit_batch(&self, _batch: SessionBatch) -> Self::ReplyFuture {
             std::future::ready(Ok(BatchReply {

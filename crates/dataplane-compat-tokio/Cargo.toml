@@ -5,5 +5,4 @@ edition = "2021"
 
 [dependencies]
 dataplane-compat = { path = "../dataplane-compat" }
-dataplane-runtime = { path = "../dataplane-runtime" }
 tokio = { version = "1", features = ["rt", "sync", "net", "io-util"] }

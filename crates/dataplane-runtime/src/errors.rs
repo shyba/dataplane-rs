@@ -8,6 +8,30 @@ pub enum NifError {
     StartupProfileLayout,
 }
 
+impl From<dataplane_compat::boundary::BoundaryError> for NifError {
+    fn from(error: dataplane_compat::boundary::BoundaryError) -> Self {
+        match error {
+            dataplane_compat::boundary::BoundaryError::Errno(errno) => Self::Errno(errno),
+            dataplane_compat::boundary::BoundaryError::Closed => Self::Closed,
+            dataplane_compat::boundary::BoundaryError::Timeout => Self::Timeout,
+            dataplane_compat::boundary::BoundaryError::StartupProfileLayout => {
+                Self::StartupProfileLayout
+            }
+        }
+    }
+}
+
+impl From<NifError> for dataplane_compat::boundary::BoundaryError {
+    fn from(error: NifError) -> Self {
+        match error {
+            NifError::Errno(errno) => Self::Errno(errno),
+            NifError::Closed => Self::Closed,
+            NifError::Timeout => Self::Timeout,
+            NifError::StartupProfileLayout => Self::StartupProfileLayout,
+        }
+    }
+}
+
 impl NifError {
     pub fn from_errno(errno: i32) -> Self {
         NifError::Errno(errno)

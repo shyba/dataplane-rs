@@ -2,18 +2,19 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use dataplane_compat::boundary::{BatchReply, BoundaryAdapter, SessionBatch};
-use dataplane_runtime::errors::{NifError, Result};
+use dataplane_compat::boundary::{
+    BatchReply, BoundaryAdapter, BoundaryError, BoundaryResult, SessionBatch,
+};
 use tokio::sync::oneshot;
 
-type BoxReplyFuture = Pin<Box<dyn Future<Output = Result<BatchReply>> + Send + 'static>>;
+type BoxReplyFuture = Pin<Box<dyn Future<Output = BoundaryResult<BatchReply>> + Send + 'static>>;
 
 pub trait TokioBatchSink: Send + Sync + 'static {
     fn submit_batch(
         &self,
         batch: SessionBatch,
-        reply: oneshot::Sender<Result<BatchReply>>,
-    ) -> Result<()>;
+        reply: oneshot::Sender<BoundaryResult<BatchReply>>,
+    ) -> BoundaryResult<()>;
 }
 
 #[derive(Clone)]
@@ -38,7 +39,7 @@ where
         Box::pin(async move {
             let (tx, rx) = oneshot::channel();
             sink.submit_batch(batch, tx)?;
-            rx.await.map_err(|_| NifError::Closed)?
+            rx.await.map_err(|_| BoundaryError::Closed)?
         })
     }
 }
@@ -46,7 +47,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dataplane_runtime::runtime_protocol::BatchOp;
+    use dataplane_compat::boundary::BatchOp;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct ImmediateSink {
@@ -57,8 +58,8 @@ mod tests {
         fn submit_batch(
             &self,
             batch: SessionBatch,
-            reply: oneshot::Sender<Result<BatchReply>>,
-        ) -> Result<()> {
+            reply: oneshot::Sender<BoundaryResult<BatchReply>>,
+        ) -> BoundaryResult<()> {
             self.calls.fetch_add(1, Ordering::Relaxed);
             let _ = reply.send(Ok(BatchReply {
                 session_id: batch.session_id,
@@ -74,8 +75,8 @@ mod tests {
         fn submit_batch(
             &self,
             _batch: SessionBatch,
-            _reply: oneshot::Sender<Result<BatchReply>>,
-        ) -> Result<()> {
+            _reply: oneshot::Sender<BoundaryResult<BatchReply>>,
+        ) -> BoundaryResult<()> {
             Ok(())
         }
     }
@@ -120,6 +121,6 @@ mod tests {
             Err(err) => err,
         };
 
-        assert!(matches!(err, NifError::Closed));
+        assert!(matches!(err, BoundaryError::Closed));
     }
 }

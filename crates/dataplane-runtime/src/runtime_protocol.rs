@@ -1,16 +1,4 @@
-use crate::errors::NifError;
-
-#[derive(Clone)]
-pub enum BatchOp {
-    Read { id: u64, len: usize },
-    Write { id: u64, data: Vec<u8> },
-}
-
-pub enum BatchResult {
-    Ok,
-    Data(Vec<u8>),
-    Error(NifError),
-}
+pub use dataplane_compat::boundary::{BatchOp, BatchResult, BoundaryError};
 
 #[derive(Clone)]
 pub struct RuntimeStatsSnapshot {

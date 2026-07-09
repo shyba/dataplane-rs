@@ -6,24 +6,23 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 
 use dataplane_rp2040_scd41_smoke::rolling_log::{
-    Flash, FlashError, Geometry, RAW_MEASUREMENT_BYTES, RECORD_PAYLOAD_BYTES, RECORDS_PER_PAGE,
-    RollingLog,
+    Flash, FlashError, Geometry, RollingLog, RAW_MEASUREMENT_BYTES, RECORDS_PER_PAGE,
+    RECORD_PAYLOAD_BYTES,
 };
 use dataplane_runtime::rp2040::hil_recovery::{
-    WatchdogBootselConfig, WatchdogBootselRecovery, watchdog_reset_pending,
+    reset_to_usb_boot, watchdog_reset_pending, WatchdogBootselConfig, WatchdogBootselRecovery,
 };
 #[cfg(feature = "usb-auto-bootsel")]
 use dataplane_runtime::rp2040::usb_auto_bootsel::UsbCdcAutoBootsel;
 use embedded_hal_async::delay::DelayNs;
 use rp2040_hal as hal;
-use scd4x::Scd4xAsync;
 use scd4x::types::{RawSensorData, SensorData};
+use scd4x::Scd4xAsync;
 use usb_device::class_prelude::UsbBusAllocator;
 use usb_device::prelude::*;
 use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
-use hal::Timer;
-use hal::clocks::{Clock, init_clocks_and_plls};
+use hal::clocks::{init_clocks_and_plls, Clock};
 use hal::fugit::RateExtU32;
 use hal::gpio::{FunctionI2c, Pin as GpioPin};
 use hal::i2c::I2C;
@@ -31,6 +30,7 @@ use hal::pac;
 use hal::sio::Sio;
 use hal::usb::UsbBus;
 use hal::watchdog::Watchdog;
+use hal::Timer;
 
 const XOSC_CRYSTAL_FREQ_HZ: u32 = 12_000_000;
 const LOG_PERIOD_US: u64 = 1_000_000;
@@ -913,10 +913,23 @@ fn main() -> ! {
         pending_pos: 0,
     });
     let flash = RefCell::new(Rp2040Flash);
-    let log = RefCell::new(
-        RollingLog::recover_or_initialize(&mut *flash.borrow_mut(), STORAGE_GEOMETRY)
-            .unwrap_or_else(|_| RollingLog::recover(&Rp2040Flash, STORAGE_GEOMETRY).unwrap()),
-    );
+    let recovered_log =
+        match RollingLog::recover_or_initialize(&mut *flash.borrow_mut(), STORAGE_GEOMETRY) {
+            Ok(log) => log,
+            Err(_) => match RollingLog::recover(&Rp2040Flash, STORAGE_GEOMETRY) {
+                Ok(log) => log,
+                Err(_) => {
+                    logger
+                        .borrow_mut()
+                        .log_status("storage recovery failed; entering BOOTSEL");
+                    for _ in 0..SERIAL_RESPONSE_WRITE_RETRIES {
+                        logger.borrow_mut().poll();
+                    }
+                    reset_to_usb_boot();
+                }
+            },
+        };
+    let log = RefCell::new(recovered_log);
     {
         let recovery = log.borrow().recovery();
         logger.borrow_mut().log_storage_recovery(

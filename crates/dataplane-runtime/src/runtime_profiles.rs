@@ -1,3 +1,13 @@
+//! Advanced runtime-profile facade over `dataplane-core-reactor`.
+//!
+//! This module intentionally exposes selected core-reactor layout, policy, and
+//! runtime types because the profile builders and dispatch helpers are typed
+//! over those core implementations. Treat this as the advanced/core API: stable
+//! callers may use the builders, `ProfiledRuntime`, and `RuntimeLoopHandle`,
+//! while direct dependence on re-exported core types couples callers to the
+//! runtime/core version set documented in `docs/architecture-target-validation.md`.
+//! Re-exports here are not an accidental general runtime boundary.
+
 pub use dataplane_core_reactor::balanced_profile::{
     BalancedCompletionTick, BalancedHostPolicy, BalancedProfileBudgets, BalancedProfileError,
     BalancedProfileLayout, BalancedRecordingHostPolicy, BalancedRuntime, BalancedShardRole,

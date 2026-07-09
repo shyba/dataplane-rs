@@ -3,6 +3,9 @@ name = "dataplane-reactor"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+runtime-tools = ["dep:dataplane-runtime"]
+
 [dependencies]
 bumpalo = { version = "3", features = ["boxed"] }
 io-uring = "0.7"
@@ -10,7 +13,7 @@ socket2 = "0.5"
 libc = "0.2"
 quanta = "0.12"
 dataplane-core-reactor = { path = "../dataplane-core-reactor" }
-dataplane-runtime = { path = "../dataplane-runtime" }
+dataplane-runtime = { path = "../dataplane-runtime", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", default-features = false, features = ["cargo_bench_support"] }
@@ -26,3 +29,14 @@ harness = false
 [[bench]]
 name = "threadless_runtime_loop"
 harness = false
+required-features = ["runtime-tools"]
+
+[[bin]]
+name = "udp_ping_pong_scale"
+path = "src/bin/udp_ping_pong_scale.rs"
+required-features = ["runtime-tools"]
+
+[[bin]]
+name = "udp_shard_ping_pong_seq"
+path = "src/bin/udp_shard_ping_pong_seq.rs"
+required-features = ["runtime-tools"]

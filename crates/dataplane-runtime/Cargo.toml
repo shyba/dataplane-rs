@@ -7,6 +7,7 @@ edition = "2021"
 default = ["scheduler-fifo", "host-runtime"]
 host-runtime = [
     "dep:libc",
+    "dep:dataplane-compat",
     "dep:dataplane-core-reactor",
     "dataplane-core-reactor/host-core",
     "dep:dataplane-topology",
@@ -40,6 +41,7 @@ rustler = { version = "0.37", optional = true }
 crossbeam-channel = { version = "0.5", optional = true }
 embedded-hal = { version = "1", optional = true }
 dataplane-core-reactor = { path = "../dataplane-core-reactor", default-features = false, optional = true }
+dataplane-compat = { path = "../dataplane-compat", optional = true }
 dataplane-topology = { path = "../dataplane-topology", optional = true }
 
 [target.'cfg(target_os = "none")'.dependencies]
