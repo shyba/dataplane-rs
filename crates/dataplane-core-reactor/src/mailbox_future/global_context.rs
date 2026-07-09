@@ -28,6 +28,7 @@ pub enum ShardWaitTimeout {
 
 pub struct GlobalContext {
     pub(crate) shard_count: usize,
+    runtime_queue_capacity: usize,
     shard_signals: Vec<AtomicU32>,
     pub(crate) runtime_outbound: Vec<Vec<Mutex<Option<Producer<ShardMessage>>>>>,
     runtime_locals: Vec<Mutex<Option<ShardRuntimeQueues>>>,
@@ -38,10 +39,21 @@ pub struct GlobalContext {
 impl GlobalContext {
     #[inline(always)]
     pub fn new(shard_count: usize) -> Self {
+        Self::with_runtime_queue_capacity(shard_count, REMOTE_QUEUE_CAPACITY)
+    }
+
+    #[inline(always)]
+    pub(crate) fn with_runtime_queue_capacity(
+        shard_count: usize,
+        runtime_queue_capacity: usize,
+    ) -> Self {
         assert!(shard_count > 0, "GlobalContext requires at least one shard");
-        let (runtime_outbound, runtime_locals) = Self::build_runtime_queues(shard_count);
+        let runtime_queue_capacity = runtime_queue_capacity.max(1);
+        let (runtime_outbound, runtime_locals) =
+            Self::build_runtime_queues(shard_count, runtime_queue_capacity);
         Self {
             shard_count,
+            runtime_queue_capacity,
             shard_signals: (0..shard_count).map(|_| AtomicU32::new(0)).collect(),
             runtime_outbound,
             runtime_locals,
@@ -50,7 +62,10 @@ impl GlobalContext {
         }
     }
 
-    fn build_runtime_queues(shard_count: usize) -> RuntimeQueuesBuild {
+    fn build_runtime_queues(
+        shard_count: usize,
+        runtime_queue_capacity: usize,
+    ) -> RuntimeQueuesBuild {
         let mut outbound: Vec<Vec<Option<Producer<ShardMessage>>>> = (0..shard_count)
             .map(|_| (0..shard_count).map(|_| None).collect())
             .collect();
@@ -63,7 +78,7 @@ impl GlobalContext {
                 if source == target {
                     continue;
                 }
-                let (prod, cons) = RingBuffer::<ShardMessage>::new(REMOTE_QUEUE_CAPACITY);
+                let (prod, cons) = RingBuffer::<ShardMessage>::new(runtime_queue_capacity);
                 outbound[source][target] = Some(prod);
                 inbound[target][source] = Some(cons);
             }
@@ -86,6 +101,11 @@ impl GlobalContext {
     #[inline(always)]
     pub fn shard_count(&self) -> usize {
         self.shard_count
+    }
+
+    #[inline(always)]
+    pub(crate) fn runtime_queue_capacity(&self) -> usize {
+        self.runtime_queue_capacity
     }
 
     #[inline(always)]

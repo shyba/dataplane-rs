@@ -38,7 +38,7 @@ fn spawn_at_builds_remote_task_and_receiver() {
     let receiver_handle = global.shard_handle(1);
     let mut engine = NativeTaskEngine::<RuntimeFutureTask>::with_task_capacity(8);
 
-    let receiver = sender_handle.spawn_at(5, async move { 123u64 });
+    let receiver = sender_handle.spawn_at(5, async move { 123u64 }).unwrap();
     assert_eq!(sender_handle.drain_native_runtime_queue(&mut engine), 0);
     let _ = receiver_handle.drain_native_runtime_queue(&mut engine);
     let _ = engine.run_until_idle();
@@ -70,7 +70,7 @@ fn shard_handle_spawn_any_detached_routes_to_other_shard() {
     let receiver_handle = global.shard_handle(1);
     let mut engine = NativeTaskEngine::<RuntimeFutureTask>::with_task_capacity(8);
 
-    handle.spawn_any_detached(async {});
+    handle.spawn_any_detached(async {}).unwrap();
     assert_eq!(handle.drain_native_runtime_queue(&mut engine), 0);
     let _ = receiver_handle.drain_native_runtime_queue(&mut engine);
     let _ = engine.run_until_idle();
@@ -530,7 +530,7 @@ fn remote_queue_capacity_exhaustion_path() {
     // Spawn many detached tasks — these accumulate in outbound_pending
     // then flush on drain
     for _ in 0..1024 {
-        handle.spawn_any_detached(async {});
+        handle.spawn_any_detached(async {}).unwrap();
     }
 
     let mut engine = NativeTaskEngine::<RuntimeFutureTask>::with_task_capacity(1024 * 2);
@@ -540,6 +540,34 @@ fn remote_queue_capacity_exhaustion_path() {
 
     // if we get here without panic, queue handling is correct
     let _ = 42; // no assertion needed; test passes if we reach here without panic
+}
+
+#[test]
+fn runtime_spawn_reports_backpressure_when_ring_and_pending_are_full() {
+    let global = Arc::new(GlobalContext::with_runtime_queue_capacity(2, 1));
+    let handle = global.shard_handle(0);
+    let _receiver_handle = global.shard_handle(1);
+
+    assert_eq!(handle.spawn_any_detached(async {}), Ok(()));
+    assert_eq!(handle.spawn_any_detached(async {}), Ok(()));
+
+    let err = handle.spawn_any_detached(async {}).unwrap_err();
+    assert!(matches!(
+        err,
+        super::shard_handle::RemoteSpawnError::QueueFull { target_shard: 1 }
+    ));
+}
+
+#[test]
+fn runtime_flush_stops_when_remote_ring_is_full() {
+    let global = Arc::new(GlobalContext::with_runtime_queue_capacity(2, 1));
+    let handle = global.shard_handle(0);
+    let _receiver_handle = global.shard_handle(1);
+
+    assert_eq!(handle.spawn_any_detached(async {}), Ok(()));
+    assert_eq!(handle.spawn_any_detached(async {}), Ok(()));
+
+    assert_eq!(handle.flush_runtime_tasks(), 0);
 }
 
 // ========================================================================
@@ -554,15 +582,15 @@ fn outbound_pending_flush_ordering_across_shards() {
     let h2 = global.shard_handle(2);
 
     // push tasks targeting different shards
-    h0.spawn_any_detached(async {});
-    h0.spawn_any_detached(async {});
+    h0.spawn_any_detached(async {}).unwrap();
+    h0.spawn_any_detached(async {}).unwrap();
 
     let mut engine = NativeTaskEngine::<RuntimeFutureTask>::with_task_capacity(16);
 
     // flush from each shard handle independently
-    h0.flush_runtime_tasks();
-    h1.flush_runtime_tasks();
-    h2.flush_runtime_tasks();
+    let _ = h0.flush_runtime_tasks();
+    let _ = h1.flush_runtime_tasks();
+    let _ = h2.flush_runtime_tasks();
 
     // drain should get all tasks in order (FIFO per shard ring)
     let _ = h1.drain_native_runtime_queue(&mut engine);
@@ -733,7 +761,7 @@ fn mailbox_poll_uses_no_thread_blocking_primitives() {
     // never calls any std::thread primitives directly.
     let global = Arc::new(GlobalContext::new(2));
     let sender = global.shard_handle(0);
-    let receiver = sender.spawn_at(1, async { 42u32 });
+    let receiver = sender.spawn_at(1, async { 42u32 }).unwrap();
     let mut task = FutureTask::new_local(receiver);
     // poll_dummy must not block - it either returns Ready or Pending without
     // calling any thread-blocking primitives

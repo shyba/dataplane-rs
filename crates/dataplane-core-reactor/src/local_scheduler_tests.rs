@@ -92,6 +92,25 @@ fn domain_scope_offloads_within_domain() {
 }
 
 #[test]
+fn mesh_zero_spill_reports_full_when_ring_is_full() {
+    let mut mesh = build_shard_mesh::<u64>(2, 1);
+    assert_eq!(mesh[0].try_push_admit(1, 10), Ok(()));
+
+    let err = mesh[0].try_push_admit(1, 11).unwrap_err();
+    assert_eq!(err.into_inner(), 11);
+}
+
+#[test]
+fn mesh_spill_capacity_is_hard_limit() {
+    let mut mesh = build_shard_mesh_with_spill::<u64>(2, 1, 1);
+    assert_eq!(mesh[0].try_push_admit(1, 10), Ok(()));
+    assert_eq!(mesh[0].try_push_admit(1, 11), Ok(()));
+
+    let err = mesh[0].try_push_admit(1, 12).unwrap_err();
+    assert_eq!(err.into_inner(), 12);
+}
+
+#[test]
 fn low_priority_local_task_falls_back_to_bus_when_full() {
     let placements = sample_placements();
     let mesh = build_shard_mesh::<TaskCell<u64, 256>>(4, 8).remove(0);

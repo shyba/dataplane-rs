@@ -12,6 +12,19 @@ use std::future::Future;
 use std::sync::Arc;
 use std::task::Poll;
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum RemoteSpawnError {
+    WaitCapacity(RemoteWaitCapacityError),
+    QueueFull { target_shard: usize },
+}
+
+impl From<RemoteWaitCapacityError> for RemoteSpawnError {
+    #[inline(always)]
+    fn from(value: RemoteWaitCapacityError) -> Self {
+        Self::WaitCapacity(value)
+    }
+}
+
 pub struct ShardRuntimeHandle {
     global: Arc<GlobalContext>,
     current_shard: usize,
@@ -40,12 +53,24 @@ impl ShardRuntimeHandle {
         self.current_shard
     }
 
-    fn push_runtime_task(&self, target_shard: usize, queued: QueuedRuntimeFuture) {
+    fn push_runtime_task(
+        &self,
+        target_shard: usize,
+        queued: QueuedRuntimeFuture,
+    ) -> Result<(), QueuedRuntimeFuture> {
         debug_assert_ne!(target_shard, self.current_shard);
-        self.outbound_pending.borrow_mut()[target_shard].push(queued);
+        self.flush_runtime_tasks();
+        let mut pending = self.outbound_pending.borrow_mut();
+        let queue = &mut pending[target_shard];
+        if queue.len() >= self.global.runtime_queue_capacity() {
+            return Err(queued);
+        }
+        queue.push(queued);
+        Ok(())
     }
 
-    pub fn flush_runtime_tasks(&self) {
+    pub fn flush_runtime_tasks(&self) -> usize {
+        let mut flushed = 0usize;
         let mut pending = self.outbound_pending.borrow_mut();
         for target_shard in 0..pending.len() {
             if target_shard == self.current_shard || pending[target_shard].is_empty() {
@@ -61,25 +86,19 @@ impl ShardRuntimeHandle {
             while !queue.is_empty() {
                 let slots = producer.cached_slots().max(producer.slots());
                 if slots == 0 {
-                    std::hint::spin_loop();
-                    continue;
+                    break;
                 }
                 let burst = slots.min(queue.len()).min(REMOTE_DRAIN_BURST);
                 let chunk = match producer.write_chunk_uninit(burst) {
                     Ok(chunk) => chunk,
-                    Err(ChunkError::TooFewSlots(0)) => {
-                        std::hint::spin_loop();
-                        continue;
-                    }
-                    Err(ChunkError::TooFewSlots(_)) => {
-                        std::hint::spin_loop();
-                        continue;
-                    }
+                    Err(ChunkError::TooFewSlots(_)) => break,
                 };
                 let wrote = chunk.fill_from_iter(queue.drain(..burst).map(ShardMessage::Runtime));
                 debug_assert_eq!(wrote, burst);
+                flushed += wrote;
             }
         }
+        flushed
     }
 
     fn oneshot_reserved_at<T>(&self, index: u16) -> (RemoteValueSender<T>, RemoteTaskReceiver<T>)
@@ -110,7 +129,11 @@ impl ShardRuntimeHandle {
         (sender, receiver)
     }
 
-    fn spawn_reserved_at<F, T>(&self, index: u16, future: F) -> RemoteTaskReceiver<T>
+    fn spawn_reserved_at<F, T>(
+        &self,
+        index: u16,
+        future: F,
+    ) -> Result<RemoteTaskReceiver<T>, RemoteSpawnError>
     where
         F: Future<Output = T> + Send + 'static,
         T: Send + 'static,
@@ -125,15 +148,16 @@ impl ShardRuntimeHandle {
             let output = future.await;
             let _ = publisher.send(output);
         });
-        self.push_runtime_task(target_shard, QueuedRuntimeFuture::new(task));
-        receiver
+        self.push_runtime_task(target_shard, QueuedRuntimeFuture::new(task))
+            .map_err(|_| RemoteSpawnError::QueueFull { target_shard })?;
+        Ok(receiver)
     }
 
     fn drain_runtime_queue_inner<F>(&self, mut f: F) -> usize
     where
         F: FnMut(BoxedRuntimeFuture),
     {
-        self.flush_runtime_tasks();
+        let _ = self.flush_runtime_tasks();
         let mut drained = 0usize;
         let mut runtime = self.runtime.borrow_mut();
         for consumer_cell in &mut runtime.inbound {
@@ -166,7 +190,11 @@ impl ShardRuntimeHandle {
     }
 
     #[inline(always)]
-    pub fn spawn_at<F, T>(&self, index: u16, future: F) -> RemoteTaskReceiver<T>
+    pub fn spawn_at<F, T>(
+        &self,
+        index: u16,
+        future: F,
+    ) -> Result<RemoteTaskReceiver<T>, RemoteSpawnError>
     where
         F: Future<Output = T> + Send + 'static,
         T: Send + 'static,
@@ -175,16 +203,13 @@ impl ShardRuntimeHandle {
     }
 
     #[inline(always)]
-    pub fn spawn_any<F, T>(
-        &self,
-        future: F,
-    ) -> Result<RemoteTaskReceiver<T>, RemoteWaitCapacityError>
+    pub fn spawn_any<F, T>(&self, future: F) -> Result<RemoteTaskReceiver<T>, RemoteSpawnError>
     where
         F: Future<Output = T> + Send + 'static,
         T: Send + 'static,
     {
         let index = self.global.allocate_remote_index(self.current_shard)?;
-        Ok(self.spawn_reserved_at(index, future))
+        self.spawn_reserved_at(index, future)
     }
 
     #[inline(always)]
@@ -207,7 +232,7 @@ impl ShardRuntimeHandle {
     }
 
     #[inline(always)]
-    pub fn spawn_at_detached<F>(&self, index: u16, future: F)
+    pub fn spawn_at_detached<F>(&self, index: u16, future: F) -> Result<(), RemoteSpawnError>
     where
         F: Future<Output = ()> + Send + 'static,
     {
@@ -216,16 +241,18 @@ impl ShardRuntimeHandle {
             target_shard, self.current_shard,
             "spawn_at_detached requires a remote target shard; use the local scheduler for local tasks"
         );
-        self.push_runtime_task(target_shard, QueuedRuntimeFuture::new(Box::pin(future)));
+        self.push_runtime_task(target_shard, QueuedRuntimeFuture::new(Box::pin(future)))
+            .map_err(|_| RemoteSpawnError::QueueFull { target_shard })
     }
 
     #[inline(always)]
-    pub fn spawn_any_detached<F>(&self, future: F)
+    pub fn spawn_any_detached<F>(&self, future: F) -> Result<(), RemoteSpawnError>
     where
         F: Future<Output = ()> + Send + 'static,
     {
         let target_shard = self.global.choose_remote_shard(self.current_shard);
-        self.push_runtime_task(target_shard, QueuedRuntimeFuture::new(Box::pin(future)));
+        self.push_runtime_task(target_shard, QueuedRuntimeFuture::new(Box::pin(future)))
+            .map_err(|_| RemoteSpawnError::QueueFull { target_shard })
     }
 
     #[inline(always)]

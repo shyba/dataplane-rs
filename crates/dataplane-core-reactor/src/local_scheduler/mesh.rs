@@ -9,6 +9,7 @@ use super::types::SchedulerPlacement;
 struct TxLane<T> {
     producer: Producer<T>,
     spill: VecDeque<T>,
+    spill_capacity: usize,
 }
 
 impl<T> TxLane<T> {
@@ -27,6 +28,11 @@ impl<T> TxLane<T> {
             }
         }
     }
+
+    #[inline(always)]
+    fn has_spill_capacity(&self) -> bool {
+        self.spill.len() < self.spill_capacity
+    }
 }
 
 struct RxLane<T> {
@@ -42,6 +48,26 @@ pub struct ShardMeshEndpoint<T> {
     scan_cursor: usize,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum ShardMeshPushError<T> {
+    LocalShard(T),
+    MissingLane(T),
+    Full(T),
+    Abandoned(T),
+}
+
+impl<T> ShardMeshPushError<T> {
+    #[inline(always)]
+    pub fn into_inner(self) -> T {
+        match self {
+            Self::LocalShard(item)
+            | Self::MissingLane(item)
+            | Self::Full(item)
+            | Self::Abandoned(item) => item,
+        }
+    }
+}
+
 impl<T> ShardMeshEndpoint<T> {
     #[inline(always)]
     pub fn shard_id(&self) -> usize {
@@ -54,23 +80,31 @@ impl<T> ShardMeshEndpoint<T> {
     }
 
     pub fn try_push(&mut self, dst: usize, item: T) -> Result<(), T> {
+        self.try_push_admit(dst, item)
+            .map_err(|err| err.into_inner())
+    }
+
+    pub fn try_push_admit(&mut self, dst: usize, item: T) -> Result<(), ShardMeshPushError<T>> {
         if dst == self.shard_id {
-            return Err(item);
+            return Err(ShardMeshPushError::LocalShard(item));
         }
 
         let Some(lane) = self.tx.get_mut(dst).and_then(Option::as_mut) else {
-            return Err(item);
+            return Err(ShardMeshPushError::MissingLane(item));
         };
 
         lane.flush_spill();
 
         if lane.producer.is_abandoned() {
-            return Err(item);
+            return Err(ShardMeshPushError::Abandoned(item));
         }
 
         match lane.producer.push(item) {
             Ok(()) => Ok(()),
             Err(PushError::Full(item)) => {
+                if !lane.has_spill_capacity() {
+                    return Err(ShardMeshPushError::Full(item));
+                }
                 lane.spill.push_back(item);
                 Ok(())
             }
@@ -179,6 +213,7 @@ pub fn build_shard_mesh_with_spill<T>(
             tx_matrix[src][dst] = Some(TxLane {
                 producer,
                 spill: VecDeque::with_capacity(spill_capacity),
+                spill_capacity,
             });
             rx_matrix[dst][src] = Some(RxLane { consumer });
         }
