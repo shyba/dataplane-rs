@@ -2,7 +2,7 @@
 //!
 //! Sends commands to runtime shards through the shared command channel.
 
-use super::{Command, NifError, Result, RUNTIME};
+use super::{current_runtime, Command, NifError, Result};
 
 /// Flush any commands that have been staged for batched delivery.
 ///
@@ -18,7 +18,7 @@ pub(crate) fn flush_staged_commands_all() -> Result<()> {
 /// before delegating to the shard's `Sender`.
 pub(crate) fn send_to_shard(shard: usize, cmd: Command) -> Result<()> {
     flush_staged_commands_all()?;
-    let runtime = RUNTIME.get().ok_or(NifError::Closed)?;
+    let runtime = current_runtime()?;
     if runtime.is_stopping() {
         return Err(NifError::Closed);
     }
@@ -39,7 +39,7 @@ pub(crate) fn send_to_shard_linked(shard: usize, link: u64, cmd: Command) -> Res
 /// `ShardSender::send_many`.
 pub(crate) fn send_many_to_shard(shard: usize, cmds: Vec<Command>) -> Result<()> {
     flush_staged_commands_all()?;
-    let runtime = RUNTIME.get().ok_or(NifError::Closed)?;
+    let runtime = current_runtime()?;
     if runtime.is_stopping() {
         return Err(NifError::Closed);
     }

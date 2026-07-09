@@ -65,7 +65,7 @@ use dataplane_runtime::runtime_trace::{DebugPhaseStats, LoopPhase, StallReason};
 #[allow(unused_imports)]
 use io_uring::types;
 use io_uring::IoUring;
-use once_cell::sync::OnceCell;
+use once_cell::sync::{Lazy, OnceCell};
 use rustler::{LocalPid, OwnedBinary, ResourceArc};
 
 // ---------------------------------------------------------------------------
@@ -111,7 +111,7 @@ const LATENCY_QUEUE_CAP: usize = 32;
 const RESULT_SEND_BATCH_LIMIT: usize = crate::runtime_result_queue::RESULT_SEND_BATCH_LIMIT;
 const SUBSCRIBE_INFLIGHT: usize = 2;
 
-static RUNTIME: OnceCell<Runtime> = OnceCell::new();
+static RUNTIME: Lazy<Mutex<Option<Arc<Runtime>>>> = Lazy::new(|| Mutex::new(None));
 pub(crate) static NEXT_CONTROL_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 pub(crate) static NEXT_SUBSCRIBE_SHARD: AtomicU64 = AtomicU64::new(0);
 
@@ -201,13 +201,22 @@ struct Runtime {
 }
 
 fn next_request_id_for_shard(shard: usize) -> Result<u64> {
-    let runtime = RUNTIME.get().ok_or(NifError::Closed)?;
+    let runtime = current_runtime()?;
     let sender = runtime.senders.get(shard).ok_or(NifError::Closed)?;
     let local = sender
         .control
         .next_request_id
         .fetch_add(1, Ordering::Relaxed);
     Ok((((shard + 1) as u64) << 56) | (local & 0x00ff_ffff_ffff_ffff))
+}
+
+fn current_runtime() -> Result<Arc<Runtime>> {
+    RUNTIME
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .cloned()
+        .ok_or(NifError::Closed)
 }
 
 #[inline]

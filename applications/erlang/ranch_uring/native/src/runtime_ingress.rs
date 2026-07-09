@@ -9,6 +9,14 @@ pub(crate) type IngressSender<T> = kanal::Sender<Vec<T>>;
 #[cfg(feature = "ingress-kanal")]
 pub(crate) type IngressReceiver<T> = kanal::Receiver<Vec<T>>;
 
+pub(crate) const INGRESS_CAPACITY: usize = 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IngressSendError {
+    Closed,
+    Overloaded,
+}
+
 #[cfg(feature = "ingress-local")]
 use std::collections::VecDeque;
 #[cfg(feature = "ingress-local")]
@@ -27,12 +35,12 @@ pub(crate) struct IngressReceiver<T> {
 
 #[cfg(feature = "ingress-kanal")]
 pub(crate) fn ingress_channel<T>() -> (IngressSender<T>, IngressReceiver<T>) {
-    kanal::unbounded::<Vec<T>>()
+    kanal::bounded::<Vec<T>>(INGRESS_CAPACITY)
 }
 
 #[cfg(feature = "ingress-local")]
 pub(crate) fn ingress_channel<T>() -> (IngressSender<T>, IngressReceiver<T>) {
-    let inner = Arc::new(Mutex::new(VecDeque::new()));
+    let inner = Arc::new(Mutex::new(VecDeque::with_capacity(INGRESS_CAPACITY)));
     (
         IngressSender {
             inner: inner.clone(),
@@ -42,13 +50,27 @@ pub(crate) fn ingress_channel<T>() -> (IngressSender<T>, IngressReceiver<T>) {
 }
 
 #[cfg(feature = "ingress-kanal")]
-pub(crate) fn ingress_send<T>(tx: &IngressSender<T>, batch: Vec<T>) -> Result<(), ()> {
-    tx.send(batch).map_err(|_| ())
+pub(crate) fn ingress_send<T>(
+    tx: &IngressSender<T>,
+    batch: Vec<T>,
+) -> Result<(), IngressSendError> {
+    match tx.try_send(batch) {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(IngressSendError::Overloaded),
+        Err(_) => Err(IngressSendError::Closed),
+    }
 }
 
 #[cfg(feature = "ingress-local")]
-pub(crate) fn ingress_send<T>(tx: &IngressSender<T>, batch: Vec<T>) -> Result<(), ()> {
-    tx.inner.lock().map_err(|_| ())?.push_back(batch);
+pub(crate) fn ingress_send<T>(
+    tx: &IngressSender<T>,
+    batch: Vec<T>,
+) -> Result<(), IngressSendError> {
+    let mut guard = tx.inner.lock().map_err(|_| IngressSendError::Closed)?;
+    if guard.len() >= INGRESS_CAPACITY {
+        return Err(IngressSendError::Overloaded);
+    }
+    guard.push_back(batch);
     Ok(())
 }
 
@@ -80,5 +102,19 @@ mod tests {
 
         assert_eq!(ingress_try_recv(&rx), Some(vec![11, 22, 33]));
         assert_eq!(ingress_try_recv(&rx), None);
+    }
+
+    #[test]
+    fn ingress_send_reports_overload_at_capacity() {
+        let (tx, _rx) = ingress_channel::<usize>();
+
+        for i in 0..INGRESS_CAPACITY {
+            ingress_send(&tx, vec![i]).expect("send within capacity");
+        }
+
+        assert_eq!(
+            ingress_send(&tx, vec![INGRESS_CAPACITY]),
+            Err(IngressSendError::Overloaded)
+        );
     }
 }

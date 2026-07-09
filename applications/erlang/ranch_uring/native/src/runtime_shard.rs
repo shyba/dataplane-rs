@@ -1069,14 +1069,16 @@ impl ShardState {
     #[inline]
     fn advance_provided_recv_pool_lifecycle(&mut self) -> Result<()> {
         let mut should_queue_remove = false;
+        let remove_ready = self.stop_provided_recv_pool_remove_ready();
         if let Some(pool) = self.provided_recv_pool.as_mut() {
             let _ = pool.advance_retirement();
-            debug_assert!(
-                !pool.should_queue_remove() || (pool.is_removed() && !pool.has_inflight_entries())
-            );
+            if remove_ready && pool.is_draining() {
+                let _ = pool.retire_for_remove();
+            }
+            debug_assert!(!pool.should_queue_remove() || (pool.is_removed() && remove_ready));
             should_queue_remove = pool.should_queue_remove();
         }
-        if should_queue_remove && self.stop_provided_recv_pool_remove_ready() {
+        if should_queue_remove && remove_ready {
             let _ = self.enqueue_provided_recv_pool_remove()?;
         }
         Ok(())
@@ -2983,8 +2985,10 @@ mod tests {
                 .provided_recv_pool
                 .as_mut()
                 .expect("provided recv pool should exist");
+            assert!(pool.provide_entry(0).is_some());
             pool.begin_draining();
-            assert!(pool.advance_retirement());
+            assert!(!pool.advance_retirement());
+            assert!(pool.retire_for_remove());
             assert!(!pool.is_teardown_complete());
         }
 
@@ -3427,10 +3431,8 @@ mod tests {
                 .as_mut()
                 .expect("provided recv pool should exist");
             assert!(pool.provide_entry(0).is_some());
-            let slot = pool.resolve_inflight_slot(0).expect("inflight slot");
-            assert!(pool.complete_recv(slot));
             pool.begin_draining();
-            assert!(pool.advance_retirement());
+            assert!(pool.retire_for_remove());
         }
 
         let queued = shard
@@ -3471,8 +3473,9 @@ mod tests {
                 .provided_recv_pool
                 .as_mut()
                 .expect("provided recv pool should exist");
+            assert!(pool.provide_entry(0).is_some());
             pool.begin_draining();
-            assert!(pool.advance_retirement());
+            assert!(pool.retire_for_remove());
             assert!(pool.should_queue_remove());
         }
 

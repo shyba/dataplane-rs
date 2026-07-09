@@ -518,9 +518,29 @@ impl ProvidedRecvPool {
     pub(super) fn advance_retirement(&mut self) -> bool {
         if self.can_retire() {
             self.lifetime = PoolLifetimeState::Removed;
+            if self
+                .slots
+                .iter()
+                .all(|slot| matches!(slot.state, BufSlotState::Retired))
+            {
+                self.remove_completed = true;
+            }
             return true;
         }
         false
+    }
+
+    pub(super) fn retire_for_remove(&mut self) -> bool {
+        if self.lifetime != PoolLifetimeState::Draining {
+            return false;
+        }
+        self.lifetime = PoolLifetimeState::Removed;
+        for slot in &mut self.slots {
+            if matches!(slot.state, BufSlotState::Free) {
+                slot.state = BufSlotState::Retired;
+            }
+        }
+        true
     }
 
     pub(super) fn should_queue_remove(&self) -> bool {
@@ -925,6 +945,7 @@ mod slot_id_tests {
         assert!(pool.can_retire());
         assert!(pool.advance_retirement());
         assert!(pool.is_removed());
+        assert!(pool.is_teardown_complete());
         assert!(pool.provide_entry(0).is_none());
     }
 
@@ -936,6 +957,20 @@ mod slot_id_tests {
         let slot = pool.resolve_inflight_slot(0).expect("inflight slot");
         assert!(pool.complete_recv(slot));
         assert!(pool.advance_retirement());
+        assert!(!pool.should_queue_remove());
+        assert!(!pool.mark_remove_queued());
+        assert!(pool.is_teardown_complete());
+    }
+
+    #[test]
+    fn provided_recv_pool_retire_for_remove_preserves_kernel_owned_slots() {
+        let mut pool = ProvidedRecvPool::new(7, 1);
+        assert!(pool.provide_entry(0).is_some());
+        pool.begin_draining();
+        assert!(!pool.advance_retirement());
+        assert!(pool.retire_for_remove());
+        assert!(pool.is_removed());
+        assert!(pool.has_inflight_entries());
         assert!(pool.should_queue_remove());
         assert!(pool.mark_remove_queued());
         assert!(!pool.should_queue_remove());

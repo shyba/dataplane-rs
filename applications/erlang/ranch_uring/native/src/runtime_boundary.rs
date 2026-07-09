@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::errors::{NifError, Result};
-use crate::runtime_ingress::{ingress_send, IngressReceiver, IngressSender};
+use crate::runtime_ingress::{ingress_send, IngressReceiver, IngressSendError, IngressSender};
 
 /// Shared shard-boundary plumbing for command publication and wakeup signaling.
 ///
@@ -39,7 +39,7 @@ pub(super) struct ShardSender<C> {
 impl<C> ShardSender<C> {
     pub(super) fn send(&self, cmd: C) -> Result<()> {
         let len = 1usize;
-        ingress_send(&self.tx, vec![cmd]).map_err(|_| NifError::Closed)?;
+        ingress_send(&self.tx, vec![cmd]).map_err(map_ingress_send_error)?;
         self.after_publish(len)
     }
 
@@ -53,7 +53,7 @@ impl<C> ShardSender<C> {
             return Ok(());
         }
         let batch = std::mem::take(cmds);
-        ingress_send(&self.tx, batch).map_err(|_| NifError::Closed)?;
+        ingress_send(&self.tx, batch).map_err(map_ingress_send_error)?;
         self.after_publish(len)
     }
 
@@ -95,3 +95,10 @@ impl<C> ShardSender<C> {
 }
 
 pub(super) type ShardReceiver<C> = IngressReceiver<C>;
+
+fn map_ingress_send_error(err: IngressSendError) -> NifError {
+    match err {
+        IngressSendError::Closed => NifError::Closed,
+        IngressSendError::Overloaded => NifError::from_errno(libc::EAGAIN),
+    }
+}

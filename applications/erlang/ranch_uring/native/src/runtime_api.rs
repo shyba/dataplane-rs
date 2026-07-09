@@ -104,26 +104,31 @@ fn send_closed_session_command_linked(
 }
 
 pub fn start_runtime() -> Result<()> {
-    if let Some(runtime) = RUNTIME.get() {
+    let mut runtime_slot = RUNTIME
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some(runtime) = runtime_slot.as_ref() {
         if runtime.is_stopping() {
             return Err(NifError::Closed);
         }
         return Ok(());
     }
-    let runtime = Runtime::start()?;
-    let _ = RUNTIME.set(runtime);
+    *runtime_slot = Some(std::sync::Arc::new(Runtime::start()?));
     Ok(())
 }
 
 pub fn stop_runtime() -> Result<()> {
     flush_staged_commands_all()?;
-    let runtime = RUNTIME.get().ok_or(NifError::Closed)?;
+    let mut runtime_slot = RUNTIME
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let runtime = runtime_slot.take().ok_or(NifError::Closed)?;
     runtime.stop()
 }
 
 pub fn listen(owner: LocalPid, port: u16, backlog: i32) -> Result<ResourceArc<SocketRef>> {
     flush_staged_commands_all()?;
-    let runtime = RUNTIME.get().ok_or(NifError::Closed)?;
+    let runtime = super::current_runtime()?;
     runtime.listen(owner, port, backlog)
 }
 
@@ -246,7 +251,7 @@ pub fn subscribe(reply_pid: LocalPid, operation: SubscribeOperation, fd: RawFd) 
         return Err(NifError::from_errno(libc::EINVAL));
     }
     flush_staged_commands_all()?;
-    let runtime = RUNTIME.get().ok_or(NifError::Closed)?;
+    let runtime = super::current_runtime()?;
     let shard = shard_for_subscribe(operation, fd, runtime.senders.len());
     let subscription_id = next_request_id_for_shard(shard)?;
     runtime.senders[shard].send(Command::Subscribe {
@@ -260,7 +265,7 @@ pub fn subscribe(reply_pid: LocalPid, operation: SubscribeOperation, fd: RawFd) 
 
 pub fn subscribe_control(subscription_id: u64, control: SubscribeControl) -> Result<()> {
     flush_staged_commands_all()?;
-    let runtime = RUNTIME.get().ok_or(NifError::Closed)?;
+    let runtime = super::current_runtime()?;
     let shard = shard_from_routed_id(subscription_id, runtime.senders.len())?;
     runtime.senders[shard].send(Command::SubscribeControl {
         subscription_id,
@@ -270,7 +275,7 @@ pub fn subscribe_control(subscription_id: u64, control: SubscribeControl) -> Res
 
 pub fn subscribe_add_consumer(reply_pid: LocalPid, subscription_id: u64) -> Result<()> {
     flush_staged_commands_all()?;
-    let runtime = RUNTIME.get().ok_or(NifError::Closed)?;
+    let runtime = super::current_runtime()?;
     let shard = shard_from_routed_id(subscription_id, runtime.senders.len())?;
     runtime.senders[shard].send(Command::SubscribeAddConsumer {
         subscription_id,
@@ -584,7 +589,7 @@ pub fn shutdown_enqueue(session: ResourceArc<SocketRef>, how: i32) -> Result<()>
 
 pub fn debug_runtime_stats() -> Result<Vec<RuntimeStatsSnapshot>> {
     flush_staged_commands_all()?;
-    let runtime = RUNTIME.get().ok_or(NifError::Closed)?;
+    let runtime = super::current_runtime()?;
     runtime.debug_runtime_stats()
 }
 
@@ -592,7 +597,7 @@ pub fn close(handle: ResourceArc<SocketRef>) -> Result<()> {
     match &handle.kind {
         SocketKind::Listener(listener_state) => {
             listener_state.closed.store(true, Ordering::Release);
-            let runtime = RUNTIME.get().ok_or(NifError::Closed)?;
+            let runtime = super::current_runtime()?;
             runtime.close_listener(listener_state.listener_id)
         }
         SocketKind::Session(session_state) => {
@@ -647,11 +652,8 @@ pub fn close_enqueue(handle: ResourceArc<SocketRef>) -> Result<()> {
     match &handle.kind {
         SocketKind::Listener(listener_state) => {
             listener_state.closed.store(true, Ordering::Release);
-            if let Some(runtime) = RUNTIME.get() {
-                runtime.close_listener(listener_state.listener_id)
-            } else {
-                Err(NifError::Closed)
-            }
+            let runtime = super::current_runtime()?;
+            runtime.close_listener(listener_state.listener_id)
         }
         SocketKind::Session(session_state) => {
             if !session_state.mark_api_closed() {
@@ -703,7 +705,7 @@ pub fn alloc_request_id(session: &ResourceArc<SocketRef>) -> Result<u64> {
 
 pub fn bench_runtime_nop_async(reply_pid: LocalPid) -> Result<u64> {
     flush_staged_commands_all()?;
-    let runtime = RUNTIME.get().ok_or(NifError::Closed)?;
+    let runtime = super::current_runtime()?;
     let shard = current_thread_shard(runtime.senders.len());
     let request_id = next_request_id_for_shard(shard)?;
     runtime.senders[shard].send(Command::linked(
@@ -717,7 +719,7 @@ pub fn bench_runtime_nop_async(reply_pid: LocalPid) -> Result<u64> {
 }
 
 pub fn caller_shard() -> Result<usize> {
-    let runtime = RUNTIME.get().ok_or(NifError::Closed)?;
+    let runtime = super::current_runtime()?;
     Ok(current_thread_shard(runtime.senders.len()))
 }
 
@@ -726,7 +728,7 @@ pub fn stat_async_to(fd: RawFd, reply_pid: LocalPid) -> Result<u64> {
         return Err(NifError::from_errno(libc::EINVAL));
     }
     flush_staged_commands_all()?;
-    let runtime = RUNTIME.get().ok_or(NifError::Closed)?;
+    let runtime = super::current_runtime()?;
     let shard = current_thread_shard(runtime.senders.len());
     let request_id = next_request_id_for_shard(shard)?;
     runtime.senders[shard].send(Command::linked(
