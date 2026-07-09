@@ -653,16 +653,12 @@ dependencies = [
 [[package]]
 name = "dataplane-compat"
 version = "0.1.0"
-dependencies = [
- "dataplane-runtime",
-]
 
 [[package]]
 name = "dataplane-compat-tokio"
 version = "0.1.0"
 dependencies = [
  "dataplane-compat",
- "dataplane-runtime",
  "tokio",
 ]
 
@@ -784,6 +780,7 @@ dependencies = [
  "criterion",
  "crossbeam-channel",
  "crossbeam-queue",
+ "dataplane-compat",
  "dataplane-core-reactor",
  "dataplane-topology",
  "embedded-hal 1.0.0",

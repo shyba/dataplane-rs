@@ -1290,11 +1290,11 @@ impl ShardState {
 pub(super) fn reply_pending_batch(mut batch: PendingBatch, result: Result<()>) {
     if let Err(err) = result {
         if batch.results.is_empty() {
-            batch.results.push((0, BatchResult::Error(err)));
+            batch.results.push((0, BatchResult::Error(err.into())));
         } else {
             for (_, item) in &mut batch.results {
                 if matches!(item, BatchResult::Ok) {
-                    *item = BatchResult::Error(err.clone());
+                    *item = BatchResult::Error(err.clone().into());
                 }
             }
         }

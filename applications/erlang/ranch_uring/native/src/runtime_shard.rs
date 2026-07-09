@@ -1075,7 +1075,7 @@ impl ShardState {
             if remove_ready && pool.is_draining() {
                 let _ = pool.retire_for_remove();
             }
-            debug_assert!(!pool.should_queue_remove() || (pool.is_removed() && remove_ready));
+            debug_assert!(!pool.should_queue_remove() || pool.is_removed());
             should_queue_remove = pool.should_queue_remove();
         }
         if should_queue_remove && remove_ready {
@@ -1612,7 +1612,7 @@ impl ShardState {
                     send_batch_reply_to(
                         &target,
                         request_id,
-                        vec![(0, BatchResult::Error(NifError::Closed))],
+                        vec![(0, BatchResult::Error(NifError::Closed.into()))],
                     );
                 }
             }
@@ -2059,7 +2059,10 @@ impl ShardState {
             send_batch_reply_to(
                 &target,
                 request_id,
-                vec![(0, BatchResult::Error(NifError::from_errno(libc::EBUSY)))],
+                vec![(
+                    0,
+                    BatchResult::Error(NifError::from_errno(libc::EBUSY).into()),
+                )],
             );
             return true;
         }
@@ -2104,7 +2107,7 @@ impl ShardState {
                         return;
                     };
                     let result = if current_tx + data_len > TX_QUEUE_MAX_BYTES {
-                        BatchResult::Error(NifError::from_errno(libc::EAGAIN))
+                        BatchResult::Error(NifError::from_errno(libc::EAGAIN).into())
                     } else {
                         let pending = self.make_pending_write(data);
                         if let Some(conn) = self.conns.get_mut(&session_id) {
@@ -3375,7 +3378,7 @@ mod tests {
     }
 
     #[test]
-    fn provided_recv_pool_remove_is_queued_only_after_quiescence() {
+    fn provided_recv_pool_remove_does_not_wait_for_unused_kernel_buffers() {
         let mut shard = make_shard_state_with_provided_pool(ProvidedRecvPool::new(7, 1));
 
         {
@@ -3389,28 +3392,7 @@ mod tests {
 
         shard
             .advance_provided_recv_pool_lifecycle()
-            .expect("advance with inflight slot");
-        assert!(shard
-            .provided_recv_pool
-            .as_ref()
-            .is_some_and(|pool| pool.is_draining()));
-        assert!(!shard
-            .latency_ops
-            .values()
-            .any(|op| matches!(op, Op::ProvidedRecvPoolRemove)));
-
-        {
-            let pool = shard
-                .provided_recv_pool
-                .as_mut()
-                .expect("provided recv pool should exist");
-            let slot = pool.resolve_inflight_slot(0).expect("inflight slot");
-            assert!(pool.complete_recv(slot));
-        }
-
-        shard
-            .advance_provided_recv_pool_lifecycle()
-            .expect("advance after inflight drain");
+            .expect("advance with an unused kernel-provided buffer");
         assert!(shard
             .provided_recv_pool
             .as_ref()

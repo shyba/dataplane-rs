@@ -174,6 +174,7 @@ pub fn send_batch_reply(pid: &LocalPid, request_id: u64, results: Vec<(u64, Batc
                     None => (id, (atoms::error(), enomem_atom(env))).encode(env),
                 },
                 BatchResult::Error(err) => {
+                    let err = NifError::from(err);
                     let atom = rustler::types::atom::Atom::from_str(env, err.atom_name())
                         .unwrap_or_else(|_| atoms::error());
                     (id, (atoms::error(), atom)).encode(env)

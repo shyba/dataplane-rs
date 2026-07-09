@@ -18,6 +18,7 @@
 -export([
     listen_specified_port/1,
     listen_random_port/1,
+    runtime_restart_after_stop/1,
     accept_connected_client/1,
     accept_timeout/1,
     accept_timeout_cleanup/1,
@@ -76,6 +77,7 @@ groups() ->
         {listener_lifecycle, [sequence], [
             listen_specified_port,
             listen_random_port,
+            runtime_restart_after_stop,
             accept_connected_client,
             accept_timeout,
             accept_timeout_cleanup,
@@ -177,6 +179,12 @@ listen_random_port(_Config) ->
     {ok, {_Addr, Port}} = ranch_uring:sockname(Sock),
     ?assert(Port > 0),
     ranch_uring:close(Sock).
+
+runtime_restart_after_stop(_Config) ->
+    ok = application:stop(ranch_uring),
+    ok = application:stop(ranch),
+    {ok, _} = application:ensure_all_started(ranch_uring),
+    ok.
 
 accept_connected_client(Config) ->
     _Port = proplists:get_value(port, Config),

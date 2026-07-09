@@ -6,23 +6,24 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 
 use dataplane_rp2040_scd41_smoke::rolling_log::{
-    Flash, FlashError, Geometry, RollingLog, RAW_MEASUREMENT_BYTES, RECORDS_PER_PAGE,
-    RECORD_PAYLOAD_BYTES,
+    Flash, FlashError, Geometry, RAW_MEASUREMENT_BYTES, RECORD_PAYLOAD_BYTES, RECORDS_PER_PAGE,
+    RollingLog,
 };
 use dataplane_runtime::rp2040::hil_recovery::{
-    reset_to_usb_boot, watchdog_reset_pending, WatchdogBootselConfig, WatchdogBootselRecovery,
+    WatchdogBootselConfig, WatchdogBootselRecovery, reset_to_usb_boot, watchdog_reset_pending,
 };
 #[cfg(feature = "usb-auto-bootsel")]
 use dataplane_runtime::rp2040::usb_auto_bootsel::UsbCdcAutoBootsel;
 use embedded_hal_async::delay::DelayNs;
 use rp2040_hal as hal;
-use scd4x::types::{RawSensorData, SensorData};
 use scd4x::Scd4xAsync;
+use scd4x::types::{RawSensorData, SensorData};
 use usb_device::class_prelude::UsbBusAllocator;
 use usb_device::prelude::*;
 use usbd_serial::{SerialPort, USB_CLASS_CDC};
 
-use hal::clocks::{init_clocks_and_plls, Clock};
+use hal::Timer;
+use hal::clocks::{Clock, init_clocks_and_plls};
 use hal::fugit::RateExtU32;
 use hal::gpio::{FunctionI2c, Pin as GpioPin};
 use hal::i2c::I2C;
@@ -30,7 +31,6 @@ use hal::pac;
 use hal::sio::Sio;
 use hal::usb::UsbBus;
 use hal::watchdog::Watchdog;
-use hal::Timer;
 
 const XOSC_CRYSTAL_FREQ_HZ: u32 = 12_000_000;
 const LOG_PERIOD_US: u64 = 1_000_000;

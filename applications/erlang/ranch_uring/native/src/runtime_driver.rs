@@ -155,6 +155,10 @@ impl ShardState {
             let should_submit = main_sqpoll
                 || main_len >= self.main_submit_batch
                 || self.submit_pressure
+                // A pending receive can block the shard on the latency ring.
+                // Do not leave a small main-ring batch below its threshold in
+                // that state, or the peer can wait indefinitely for an echo.
+                || self.has_latency_io_work()
                 || now.saturating_sub(self.main_last_submit_ns) >= self.main_submit_max_delay_ns;
             if should_submit {
                 submitted += retry_eintr(|| self.main_ring.submitter().submit())?;
@@ -212,7 +216,10 @@ impl ShardState {
             return Ok(false);
         };
         debug_assert!(pool.is_draining() || pool.is_removed());
-        debug_assert!(!pool.has_inflight_entries());
+        // `RemoveBuffers` is the kernel-side handoff for slots still owned by
+        // the provided-buffer group. During stop, those slots do not produce a
+        // recv CQE merely because no connection remains, so requiring an empty
+        // local in-flight set would leave the shard in Draining forever.
         if !pool.mark_remove_queued() {
             return Ok(false);
         }
