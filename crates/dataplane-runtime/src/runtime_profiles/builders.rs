@@ -165,28 +165,12 @@ where
     D: ReactorDriver,
     T: NativeTask,
 {
-    match profile.profile_kind {
-        ProfileKind::Balanced => BalancedProfileLayout::from_profile(
-            profile,
-            [BalancedShardRole::Control, BalancedShardRole::Worker],
-            BalancedProfileBudgets::default(),
-        )
-        .map(|layout| {
-            ProfiledRuntime::Balanced(
-                layout.build_runtime_with_task_capacity(driver, task_capacity),
-            )
-        }),
-        ProfileKind::Embedded => EmbeddedProfileLayout::from_profile(profile).map(|layout| {
-            ProfiledRuntime::Embedded(
-                layout.build_runtime_with_task_capacity(driver, task_capacity),
-            )
-        }),
-        ProfileKind::Performance => PerformanceProfileLayout::from_profile(profile).map(|layout| {
-            ProfiledRuntime::Performance(
-                layout.build_runtime_with_task_capacity(driver, task_capacity),
-            )
-        }),
-    }
+    build_profiled_runtime_from_profile_with_policy(
+        profile,
+        driver,
+        task_capacity,
+        BalancedRecordingHostPolicy::default(),
+    )
 }
 
 #[inline]

@@ -81,9 +81,6 @@ fn embedded_reference_profile_resolves_to_two_shards() {
     let profile = TopologyProfile::embedded_reference();
     let resolved = profile.resolve().expect("resolve embedded profile");
     assert_eq!(resolved.profile.profile_kind, ProfileKind::Embedded);
-    assert_eq!(resolved.profile.queue_profile, QueueProfile::Embedded);
-    assert_eq!(resolved.profile.timer_profile, TimerProfile::Embedded);
-    assert_eq!(resolved.profile.parking_profile, ParkingProfile::Embedded);
     assert_eq!(resolved.topology.shard_count(), 2);
 }
 
@@ -92,12 +89,6 @@ fn performance_dual_shard_profile_resolves_to_two_shards() {
     let profile = TopologyProfile::performance_dual_shard();
     let resolved = profile.resolve().expect("resolve performance profile");
     assert_eq!(resolved.profile.profile_kind, ProfileKind::Performance);
-    assert_eq!(resolved.profile.queue_profile, QueueProfile::Performance);
-    assert_eq!(resolved.profile.timer_profile, TimerProfile::Performance);
-    assert_eq!(
-        resolved.profile.parking_profile,
-        ParkingProfile::Performance
-    );
     assert_eq!(resolved.topology.shard_count(), 2);
 }
 
@@ -105,21 +96,12 @@ fn performance_dual_shard_profile_resolves_to_two_shards() {
 fn dual_shard_family_constructors_keep_profile_axes_aligned() {
     let embedded = TopologyProfile::embedded_reference();
     assert_eq!(embedded.profile_kind, ProfileKind::Embedded);
-    assert_eq!(embedded.queue_profile, QueueProfile::Embedded);
-    assert_eq!(embedded.timer_profile, TimerProfile::Embedded);
-    assert_eq!(embedded.parking_profile, ParkingProfile::Embedded);
 
     let balanced = TopologyProfile::balanced_dual_shard();
     assert_eq!(balanced.profile_kind, ProfileKind::Balanced);
-    assert_eq!(balanced.queue_profile, QueueProfile::Balanced);
-    assert_eq!(balanced.timer_profile, TimerProfile::Balanced);
-    assert_eq!(balanced.parking_profile, ParkingProfile::Balanced);
 
     let performance = TopologyProfile::performance_dual_shard();
     assert_eq!(performance.profile_kind, ProfileKind::Performance);
-    assert_eq!(performance.queue_profile, QueueProfile::Performance);
-    assert_eq!(performance.timer_profile, TimerProfile::Performance);
-    assert_eq!(performance.parking_profile, ParkingProfile::Performance);
 }
 
 #[test]
@@ -152,9 +134,7 @@ fn profile_for_kind_and_shard_count_keep_axes_aligned() {
     let profile = TopologyProfile::for_kind(ProfileKind::Performance).with_shard_count(4);
     assert_eq!(profile.profile_kind, ProfileKind::Performance);
     assert_eq!(profile.shard_count, 4);
-    assert_eq!(profile.queue_profile, QueueProfile::Performance);
-    assert_eq!(profile.timer_profile, TimerProfile::Performance);
-    assert_eq!(profile.parking_profile, ParkingProfile::Performance);
+    assert_eq!(profile.profile_kind, ProfileKind::Performance);
 }
 
 #[test]

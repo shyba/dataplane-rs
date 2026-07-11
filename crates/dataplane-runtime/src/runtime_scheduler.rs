@@ -1,4 +1,4 @@
-pub use dataplane_core_reactor::runtime_scheduler::{
+pub use dataplane_core_reactor::io_fairness::{
     FifoScheduler, ScheduledItem, SchedulerPolicy, SharesScheduler,
 };
 

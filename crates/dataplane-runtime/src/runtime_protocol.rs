@@ -75,3 +75,10 @@ pub struct RuntimeStatsSnapshot {
     pub callback_fifo_peak: usize,
     pub callback_fifo_spill_count: u64,
 }
+
+/// Network address in wire-friendly form, independent of any NIF types.
+#[derive(Clone, Debug)]
+pub enum NetAddr {
+    V4([u8; 4], u16),
+    V6([u16; 8], u16),
+}

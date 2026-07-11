@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib"]
 default = ["scheduler-fifo", "ingress-kanal"]
 scheduler-fifo = ["dataplane-runtime/scheduler-fifo"]
 scheduler-shares = ["dataplane-runtime/scheduler-shares"]
-exec-strategy-sqpoll = []
+exec-strategy-sqpoll = ["dataplane-uring/exec-strategy-sqpoll"]
 current-thread-shard-driver = []
 bench-tokio = ["dep:tokio"]
 bench-tokio-uring = ["bench-tokio", "dep:tokio-uring"]
@@ -43,3 +43,4 @@ dataplane-reactor = { path = "../../../../crates/dataplane-reactor" }
 dataplane-core-reactor = { path = "../../../../crates/dataplane-core-reactor" }
 dataplane-runtime = { path = "../../../../crates/dataplane-runtime", features = ["erlang-nif"] }
 dataplane-nif = { path = "../../../../crates/dataplane-nif" }
+dataplane-uring = { path = "../../../../crates/dataplane-uring", features = ["test-support"] }

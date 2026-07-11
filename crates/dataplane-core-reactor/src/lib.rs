@@ -43,7 +43,12 @@ pub mod reactor_model;
 #[cfg(feature = "host-core")]
 pub mod reactor_runtime;
 #[cfg(feature = "host-core")]
-pub mod runtime_scheduler;
+pub mod io_fairness;
+#[cfg(feature = "host-core")]
+#[deprecated(note = "renamed to `io_fairness`; this alias will be removed in a future revision")]
+pub mod runtime_scheduler {
+    pub use crate::io_fairness::*;
+}
 #[cfg(feature = "host-core")]
 pub mod runtime_tls;
 #[cfg(feature = "host-core")]

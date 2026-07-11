@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "applications/erlang/ranch_uring/native",
+    "crates/dataplane",
     "crates/dataplane-core-reactor-alloc",
     "crates/dataplane-core-reactor",
     "crates/dataplane-compat",
@@ -10,6 +11,7 @@ members = [
     "crates/dataplane-reactor",
     "crates/dataplane-runtime",
     "crates/dataplane-topology",
+    "crates/dataplane-uring",
     "crates/dataplane-microkernel-core",
     "crates/dataplane-x86_64-microkernel-smoke",
     "crates/dataplane-qemu-cortexm0-smoke",

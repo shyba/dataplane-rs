@@ -134,8 +134,8 @@ fn embedded_reference_layout_uses_embedded_profile_and_smaller_budgets() {
         dataplane_topology::ProfileKind::Embedded
     );
     assert_eq!(
-        layout.profile().queue_profile,
-        dataplane_topology::QueueProfile::Embedded
+        layout.profile().profile_kind,
+        dataplane_topology::ProfileKind::Embedded
     );
     assert_eq!(layout.budgets().task_budget, 64);
     assert_eq!(layout.budgets().completion_budget, 32);
@@ -155,7 +155,7 @@ fn embedded_reference_layout_exposes_explicit_bounded_policy_summary() {
     assert_eq!(policy.shard_count, 2);
     assert_eq!(
         policy.queue_profile,
-        dataplane_topology::QueueProfile::Embedded
+        dataplane_topology::ProfileKind::Embedded
     );
     assert_eq!(policy.budgets.task_budget, 64);
     assert_eq!(policy.budgets.completion_budget, 32);
@@ -249,8 +249,8 @@ fn performance_reference_layout_uses_performance_profile_and_larger_budgets() {
         dataplane_topology::ProfileKind::Performance
     );
     assert_eq!(
-        layout.profile().queue_profile,
-        dataplane_topology::QueueProfile::Performance
+        layout.profile().profile_kind,
+        dataplane_topology::ProfileKind::Performance
     );
     assert_eq!(layout.budgets().task_budget, 512);
     assert_eq!(layout.budgets().completion_budget, 512);

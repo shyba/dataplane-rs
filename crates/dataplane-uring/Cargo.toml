@@ -1,0 +1,20 @@
+[package]
+name = "dataplane-uring"
+version = "0.1.0"
+edition = "2021"
+description = "Generic io_uring runtime machinery extracted from the ranch_uring NIF: buffer pools, ring config, arenas, id maps, and delivery-agnostic result batching."
+
+[dependencies]
+dataplane-runtime = { path = "../dataplane-runtime" }
+io-uring = "0.7"
+quanta = "0.12"
+libc = "0.2"
+slab = "0.4"
+socket2 = { version = "0.5", features = ["all"] }
+
+[features]
+test-support = []
+exec-strategy-sqpoll = []
+
+[lints.clippy]
+undocumented_unsafe_blocks = "deny"

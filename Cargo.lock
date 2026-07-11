@@ -651,6 +651,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dataplane"
+version = "0.1.0"
+dependencies = [
+ "dataplane-core-reactor",
+ "dataplane-reactor",
+ "dataplane-runtime",
+ "dataplane-topology",
+]
+
+[[package]]
 name = "dataplane-compat"
 version = "0.1.0"
 
@@ -798,6 +808,18 @@ version = "0.1.0"
 dependencies = [
  "core_affinity",
  "hwlocality",
+]
+
+[[package]]
+name = "dataplane-uring"
+version = "0.1.0"
+dependencies = [
+ "dataplane-runtime",
+ "io-uring 0.7.11",
+ "libc",
+ "quanta",
+ "slab",
+ "socket2 0.5.10",
 ]
 
 [[package]]
@@ -2071,6 +2093,7 @@ dependencies = [
  "dataplane-nif",
  "dataplane-reactor",
  "dataplane-runtime",
+ "dataplane-uring",
  "futures-lite 1.13.0",
  "glommio",
  "io-uring 0.7.11",

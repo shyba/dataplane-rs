@@ -1,3 +1,11 @@
+//! CPU/topology-aware shard placement for the dataplane runtime.
+//!
+//! Discovers the host CPU layout via hwloc (cache/package/core domains) with
+//! `core_affinity` and generic round-robin fallbacks, and maps runtime shards
+//! onto concrete CPU cores. Also defines the profile-kind vocabulary
+//! ([`ProfileKind`]: Embedded/Balanced/Performance) plus the per-subsystem
+//! queue, timer, and parking profile knobs consumed by the runtime builders.
+
 #![forbid(unsafe_code)]
 
 use core_affinity::CoreId;
@@ -7,14 +15,21 @@ use hwlocality::{
 };
 use std::collections::HashSet;
 
+/// Named runtime tuning tier selecting shard layout and subsystem defaults.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProfileKind {
+    /// Minimal-footprint tier for constrained targets.
     Embedded,
+    /// Default tier balancing throughput and resource usage.
     Balanced,
+    /// Throughput-oriented tier for server-class hosts.
     Performance,
 }
 
 impl ProfileKind {
+    /// Parses a case-insensitive profile name, accepting aliases
+    /// (`"esp32"` → Embedded, `""` → Balanced, `"perf"`/`"server"` → Performance).
+    /// Returns `None` for unrecognized names.
     #[inline]
     pub fn parse_name(name: &str) -> Option<Self> {
         match name.trim().to_ascii_lowercase().as_str() {
@@ -26,124 +41,115 @@ impl ProfileKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum QueueProfile {
-    Embedded,
-    Balanced,
-    Performance,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TimerProfile {
-    Embedded,
-    Balanced,
-    Performance,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ParkingProfile {
-    Embedded,
-    Balanced,
-    Performance,
-}
-
+/// How shard-to-core placement is decided when resolving a [`TopologyProfile`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TopologyPlacementPolicy {
+    /// Pick the best available strategy: hwloc (L3, then package, then core),
+    /// falling back to core-affinity round-robin, then generic round-robin.
     Auto,
-    Hwloc { domain: HwlocDomainPreference },
+    /// Use hwloc placement grouped by the given domain, honoring the
+    /// profile's [`TopologyFallbackPolicy`] if that domain is unavailable.
+    Hwloc {
+        /// Preferred hwloc grouping domain.
+        domain: HwlocDomainPreference,
+    },
+    /// Round-robin shards over the CPUs reported by `core_affinity`
+    /// (or the profile's allowlist).
     CoreAffinity,
+    /// Round-robin shards over `0..available_parallelism` with no
+    /// topology awareness.
     GenericRoundRobin,
 }
 
+/// hwloc object type used to group CPUs into placement domains.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum HwlocDomainPreference {
+    /// Group CPUs sharing an L3 cache.
     L3,
+    /// Group CPUs by physical package (socket).
     Package,
+    /// Group CPUs by physical core (SMT siblings together).
     Core,
 }
 
+/// What to do when the preferred hwloc placement domain is unavailable.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TopologyFallbackPolicy {
+    /// Fall back to [`best_shard_topology`] (hwloc auto, then core-affinity,
+    /// then generic round-robin).
     Auto,
+    /// Try the given strategies in order; error with
+    /// [`TopologyProfileError::NoFallbackTopology`] if none succeeds.
     Ordered(Vec<TopologyStrategy>),
+    /// No fallback: fail with [`TopologyProfileError::NoFallbackTopology`].
     None,
 }
 
+/// Declarative shard-placement and subsystem-tuning specification,
+/// resolved into a concrete [`ShardTopology`] via [`TopologyProfile::resolve`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TopologyProfile {
+    /// Tuning tier this profile belongs to.
     pub profile_kind: ProfileKind,
+    /// Number of shards to place.
     pub shard_count: usize,
+    /// Shard-to-core placement policy.
     pub placement: TopologyPlacementPolicy,
+    /// Fallback behavior when hwloc placement fails.
     pub fallback: TopologyFallbackPolicy,
+    /// Optional restriction of placement to these CPU ids; `None` uses all
+    /// CPUs visible to `core_affinity`. Must be non-empty if set.
     pub cpu_allowlist: Option<Vec<usize>>,
-    pub queue_profile: QueueProfile,
-    pub timer_profile: TimerProfile,
-    pub parking_profile: ParkingProfile,
 }
 
 impl TopologyProfile {
+    /// Returns the default profile for a tier: two shards, auto
+    /// placement/fallback, and no allowlist. Subsystem tuning (queues,
+    /// timers, parking) derives from `profile_kind`.
     #[inline]
     pub fn for_kind(profile_kind: ProfileKind) -> Self {
-        match profile_kind {
-            ProfileKind::Embedded => Self {
-                profile_kind,
-                shard_count: 2,
-                placement: TopologyPlacementPolicy::Auto,
-                fallback: TopologyFallbackPolicy::Auto,
-                cpu_allowlist: None,
-                queue_profile: QueueProfile::Embedded,
-                timer_profile: TimerProfile::Embedded,
-                parking_profile: ParkingProfile::Embedded,
-            },
-            ProfileKind::Balanced => Self {
-                profile_kind,
-                shard_count: 2,
-                placement: TopologyPlacementPolicy::Auto,
-                fallback: TopologyFallbackPolicy::Auto,
-                cpu_allowlist: None,
-                queue_profile: QueueProfile::Balanced,
-                timer_profile: TimerProfile::Balanced,
-                parking_profile: ParkingProfile::Balanced,
-            },
-            ProfileKind::Performance => Self {
-                profile_kind,
-                shard_count: 2,
-                placement: TopologyPlacementPolicy::Auto,
-                fallback: TopologyFallbackPolicy::Auto,
-                cpu_allowlist: None,
-                queue_profile: QueueProfile::Performance,
-                timer_profile: TimerProfile::Performance,
-                parking_profile: ParkingProfile::Performance,
-            },
+        Self {
+            profile_kind,
+            shard_count: 2,
+            placement: TopologyPlacementPolicy::Auto,
+            fallback: TopologyFallbackPolicy::Auto,
+            cpu_allowlist: None,
         }
     }
 
+    /// Returns the profile with `shard_count` overridden.
     #[inline]
     pub fn with_shard_count(mut self, shard_count: usize) -> Self {
         self.shard_count = shard_count;
         self
     }
 
+    /// Default Embedded-tier profile (two shards).
     #[inline]
     pub fn embedded_reference() -> Self {
         Self::for_kind(ProfileKind::Embedded)
     }
 
+    /// Alias for [`TopologyProfile::embedded_reference`].
     #[inline]
     pub fn embedded_dual_shard() -> Self {
         Self::embedded_reference()
     }
 
+    /// Default Balanced-tier profile (two shards).
     #[inline]
     pub fn balanced_dual_shard() -> Self {
         Self::for_kind(ProfileKind::Balanced)
     }
 
+    /// Default Performance-tier profile (two shards).
     #[inline]
     pub fn performance_dual_shard() -> Self {
         Self::for_kind(ProfileKind::Performance)
     }
 
+    /// Checks profile invariants (currently: a set `cpu_allowlist` must be
+    /// non-empty) without touching the host topology.
     #[inline]
     pub fn validate(&self) -> Result<(), TopologyProfileError> {
         if matches!(self.cpu_allowlist.as_ref(), Some(list) if list.is_empty()) {
@@ -152,6 +158,8 @@ impl TopologyProfile {
         Ok(())
     }
 
+    /// Validates the profile and computes a concrete shard-to-core placement
+    /// on the current host according to the placement and fallback policies.
     #[inline]
     pub fn resolve(&self) -> Result<ResolvedTopologyProfile, TopologyProfileError> {
         self.validate()?;
@@ -170,6 +178,8 @@ impl TopologyProfile {
         })
     }
 
+    /// Resolves the profile and wraps the resulting topology in a
+    /// [`ShardGroup`] with precomputed push paths.
     #[inline]
     pub fn to_shard_group(&self) -> Result<ShardGroup, TopologyProfileError> {
         Ok(ShardGroup::from_topology(self.resolve()?.topology))
@@ -221,57 +231,85 @@ impl TopologyProfile {
     }
 }
 
+/// A [`TopologyProfile`] paired with the concrete [`ShardTopology`] it
+/// resolved to on this host.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResolvedTopologyProfile {
+    /// The profile that was resolved.
     pub profile: TopologyProfile,
+    /// The computed shard-to-core placement.
     pub topology: ShardTopology,
 }
 
+/// Errors from validating or resolving a [`TopologyProfile`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TopologyProfileError {
+    /// `cpu_allowlist` was set but contained no CPUs.
     EmptyCpuAllowlist,
+    /// The preferred placement failed and the fallback policy yielded no
+    /// usable topology.
     NoFallbackTopology,
 }
 
+/// Concrete placement strategy recorded in a resolved [`ShardTopology`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TopologyStrategy {
+    /// hwloc placement with L3-cache domains.
     HwlocL3,
+    /// hwloc placement with package (socket) domains.
     HwlocPackage,
+    /// hwloc placement with physical-core domains.
     HwlocCore,
+    /// Round-robin over CPUs reported by `core_affinity` (single domain).
     CoreAffinityRoundRobin,
+    /// Round-robin over `0..available_parallelism` (single domain).
     GenericRoundRobin,
 }
 
+/// Assignment of one shard to a CPU core within a placement domain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ShardPlacement {
+    /// Shard index.
     pub shard: usize,
+    /// OS CPU id the shard is placed on.
     pub core_id: usize,
+    /// Index of the placement domain (L3/package/core group) containing the CPU.
     pub domain: usize,
 }
 
+/// Resolved shard-to-core placement: the strategy used, the number of
+/// placement domains, and one [`ShardPlacement`] per shard.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShardTopology {
+    /// Strategy that produced this placement.
     pub strategy: TopologyStrategy,
+    /// Number of placement domains shards were spread across.
     pub domain_count: usize,
+    /// Per-shard core assignments, indexed by shard.
     pub placements: Vec<ShardPlacement>,
 }
 
 impl ShardTopology {
+    /// Number of placed shards.
     #[inline]
     pub fn shard_count(&self) -> usize {
         self.placements.len()
     }
 
+    /// CPU id assigned to `shard`, or `None` if the shard index is out of range.
     #[inline]
     pub fn core_for_shard(&self, shard: usize) -> Option<usize> {
         self.placements.get(shard).map(|p| p.core_id)
     }
 
+    /// CPU ids in shard order (index = shard, value = core id).
     #[inline]
     pub fn cpu_plan(&self) -> Vec<usize> {
         self.placements.iter().map(|p| p.core_id).collect()
     }
 
+    /// Pins the current thread to `shard`'s assigned CPU; returns `false`
+    /// if the shard is unknown or pinning failed.
     #[inline]
     pub fn pin_current_to_shard(&self, shard: usize) -> bool {
         self.core_for_shard(shard)
@@ -280,6 +318,8 @@ impl ShardTopology {
     }
 }
 
+/// A [`ShardTopology`] plus precomputed locality-ordered push routes,
+/// used for shard-to-shard message routing.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ShardGroup {
     topology: ShardTopology,
@@ -287,6 +327,9 @@ pub struct ShardGroup {
 }
 
 impl ShardGroup {
+    /// Builds a group from a resolved topology, precomputing each shard's
+    /// push path (same-domain peers first, ordered by core distance, then
+    /// remote-domain peers by domain and core distance).
     #[inline]
     pub fn from_topology(topology: ShardTopology) -> Self {
         let shard_count = topology.shard_count();
@@ -300,41 +343,52 @@ impl ShardGroup {
         }
     }
 
+    /// Builds a group of `shard_count` shards using [`best_shard_topology`].
     #[inline]
     pub fn for_shards(shard_count: usize) -> Self {
         Self::from_topology(best_shard_topology(shard_count))
     }
 
+    /// Convenience for [`ShardGroup::for_shards`] with two shards.
     #[inline]
     pub fn two_shards() -> Self {
         Self::for_shards(2)
     }
 
+    /// The underlying resolved topology.
     #[inline]
     pub fn topology(&self) -> &ShardTopology {
         &self.topology
     }
 
+    /// Number of shards in the group.
     #[inline]
     pub fn shard_count(&self) -> usize {
         self.topology.shard_count()
     }
 
+    /// Per-shard core assignments.
     #[inline]
     pub fn placements(&self) -> &[ShardPlacement] {
         &self.topology.placements
     }
 
+    /// Whether `src` may send directly to `dst`: both indices in range and
+    /// distinct.
     #[inline]
     pub fn can_direct_send(&self, src: usize, dst: usize) -> bool {
         src < self.shard_count() && dst < self.shard_count() && src != dst
     }
 
+    /// Locality-ordered list of target shards for pushes from `src`
+    /// (closest peers first), or `None` if `src` is out of range.
     #[inline]
     pub fn push_path(&self, src: usize) -> Option<&[usize]> {
         self.push_paths.get(src).map(Vec::as_slice)
     }
 
+    /// The `attempt`-th target on `src`'s push path, or `None` when the
+    /// path is exhausted or `src` is out of range.
     #[inline]
     pub fn next_push_target(&self, src: usize, attempt: usize) -> Option<usize> {
         self.push_path(src)
@@ -343,16 +397,21 @@ impl ShardGroup {
     }
 }
 
+/// Builds a [`ShardGroup`] over the best available topology for `shard_count` shards.
 #[inline]
 pub fn best_shard_group(shard_count: usize) -> ShardGroup {
     ShardGroup::from_topology(best_shard_topology(shard_count))
 }
 
+/// Convenience for [`best_shard_group`] with two shards.
 #[inline]
 pub fn two_shard_group() -> ShardGroup {
     ShardGroup::two_shards()
 }
 
+/// Computes the best shard placement the host supports: hwloc domains
+/// (L3, then package, then core), then core-affinity round-robin, then
+/// generic round-robin. A zero `shard_count` yields an empty topology.
 pub fn best_shard_topology(shard_count: usize) -> ShardTopology {
     if shard_count == 0 {
         return ShardTopology {
@@ -407,18 +466,21 @@ fn topology_for_strategy(
     }
 }
 
+/// CPU ids for `shard_count` shards from [`best_shard_topology`], in shard order.
 #[inline]
 pub fn cpu_plan(shard_count: usize) -> Vec<usize> {
     best_shard_topology(shard_count).cpu_plan()
 }
 
 impl ResolvedTopologyProfile {
+    /// Consumes the resolution and builds a [`ShardGroup`] from its topology.
     #[inline]
     pub fn to_shard_group(self) -> ShardGroup {
         ShardGroup::from_topology(self.topology)
     }
 }
 
+/// Pins the current thread to the given OS CPU id; returns `false` on failure.
 #[inline]
 pub fn pin_current_to_cpu(core_id: usize) -> bool {
     core_affinity::set_for_current(CoreId { id: core_id })

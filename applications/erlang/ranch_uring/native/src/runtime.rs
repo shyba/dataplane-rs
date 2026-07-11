@@ -115,8 +115,7 @@ static RUNTIME: Lazy<Mutex<Option<Arc<Runtime>>>> = Lazy::new(|| Mutex::new(None
 pub(crate) static NEXT_CONTROL_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 pub(crate) static NEXT_SUBSCRIBE_SHARD: AtomicU64 = AtomicU64::new(0);
 
-#[path = "runtime_clock.rs"]
-mod runtime_clock;
+use dataplane_uring::clock as runtime_clock;
 // Re-export clock functions so runtime_helpers can access them.
 pub(crate) use runtime_clock::{recv_clock_raw, recv_wait_ns_since};
 
@@ -144,8 +143,7 @@ mod runtime_send_path;
 mod runtime_subscription;
 pub use self::runtime_subscription::Subscription;
 pub use self::runtime_subscription::{SubscribeControl, SubscribeOperation};
-#[path = "runtime_limits.rs"]
-mod runtime_limits;
+use dataplane_uring::limits as runtime_limits;
 pub(crate) use self::runtime_limits::{
     CQE_BUDGET, RX_QUEUE_MAX_BYTES, SQPOLL_CHUNK_ARENA_MULTIPLIER_DEN,
     SQPOLL_CHUNK_ARENA_MULTIPLIER_NUM, SQPOLL_SUBSCRIBE_ARENA_MULTIPLIER, TX_QUEUE_MAX_BYTES,

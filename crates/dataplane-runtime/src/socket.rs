@@ -1,5 +1,7 @@
 use crossbeam_channel::Receiver;
 use rustler::{LocalPid, ResourceArc};
+
+pub use crate::runtime_protocol::NetAddr;
 use std::os::fd::RawFd;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
@@ -124,11 +126,6 @@ pub enum PacketMode {
     Raw,
 }
 
-#[derive(Clone, Debug)]
-pub enum NetAddr {
-    V4([u8; 4], u16),
-    V6([u16; 8], u16),
-}
 
 #[rustler::resource_impl]
 impl rustler::Resource for SocketRef {}

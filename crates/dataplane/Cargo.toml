@@ -1,0 +1,11 @@
+[package]
+name = "dataplane"
+version = "0.1.0"
+edition = "2021"
+description = "High-level entry point for the dataplane runtime: profile-driven builder wiring the io_uring/syscall reactor into the profiled runtime."
+
+[dependencies]
+dataplane-core-reactor = { path = "../dataplane-core-reactor" }
+dataplane-reactor = { path = "../dataplane-reactor" }
+dataplane-runtime = { path = "../dataplane-runtime" }
+dataplane-topology = { path = "../dataplane-topology" }

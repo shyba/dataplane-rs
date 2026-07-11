@@ -1,7 +1,7 @@
 pub use dataplane_topology::{
     best_shard_group, best_shard_topology, cpu_plan, pin_current_to_cpu, two_shard_group,
-    HwlocDomainPreference, ParkingProfile, ProfileKind, QueueProfile, ResolvedTopologyProfile,
-    ShardGroup, ShardPlacement, ShardTopology, TimerProfile, TopologyFallbackPolicy,
+    HwlocDomainPreference, ProfileKind, ResolvedTopologyProfile,
+    ShardGroup, ShardPlacement, ShardTopology, TopologyFallbackPolicy,
     TopologyPlacementPolicy, TopologyProfile, TopologyProfileError, TopologyStrategy,
 };
 
@@ -53,9 +53,7 @@ mod tests {
             .expect("group from balanced runtime profile");
 
         assert_eq!(profile.profile_kind, ProfileKind::Balanced);
-        assert_eq!(profile.queue_profile, QueueProfile::Balanced);
-        assert_eq!(profile.timer_profile, TimerProfile::Balanced);
-        assert_eq!(profile.parking_profile, ParkingProfile::Balanced);
+        assert_eq!(profile.profile_kind, ProfileKind::Balanced);
         assert_eq!(group.shard_count(), 2);
     }
 
@@ -67,9 +65,7 @@ mod tests {
             .expect("group from embedded runtime profile");
 
         assert_eq!(profile.profile_kind, ProfileKind::Embedded);
-        assert_eq!(profile.queue_profile, QueueProfile::Embedded);
-        assert_eq!(profile.timer_profile, TimerProfile::Embedded);
-        assert_eq!(profile.parking_profile, ParkingProfile::Embedded);
+        assert_eq!(profile.profile_kind, ProfileKind::Embedded);
         assert_eq!(group.shard_count(), 2);
     }
 
@@ -81,9 +77,7 @@ mod tests {
             .expect("group from performance runtime profile");
 
         assert_eq!(profile.profile_kind, ProfileKind::Performance);
-        assert_eq!(profile.queue_profile, QueueProfile::Performance);
-        assert_eq!(profile.timer_profile, TimerProfile::Performance);
-        assert_eq!(profile.parking_profile, ParkingProfile::Performance);
+        assert_eq!(profile.profile_kind, ProfileKind::Performance);
         assert_eq!(group.shard_count(), 2);
     }
 }

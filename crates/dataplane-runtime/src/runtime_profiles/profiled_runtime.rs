@@ -5,11 +5,13 @@ use dataplane_core_reactor::balanced_profile::{
     EmbeddedParkStore, EmbeddedTimerStore, PerformanceParkStore, PerformanceTimerStore,
 };
 use dataplane_core_reactor::host_loop::SubmissionFacade;
-use dataplane_core_reactor::native_task::NativeTask;
+use dataplane_core_reactor::native_task::{NativeTask, NativeTaskCapacityError, TaskRef};
 use dataplane_core_reactor::reactor_driver::{ReactorDriver, ReactorDriverWait};
 use dataplane_core_reactor::reactor_model::{OpToken, ReactorCompletion};
 use dataplane_core_reactor::wake_handle::WakeHandle;
 use dataplane_topology::ProfileKind;
+
+use super::loop_handle::RuntimeLoop;
 
 pub enum ProfiledRuntime<D, T, P = BalancedRecordingHostPolicy>
 where
@@ -86,6 +88,15 @@ where
             Self::Balanced(runtime) => runtime.has_task_work(),
             Self::Embedded(runtime) => runtime.has_task_work(),
             Self::Performance(runtime) => runtime.has_task_work(),
+        }
+    }
+
+    #[inline]
+    pub fn try_spawn(&mut self, task: T) -> Result<TaskRef, NativeTaskCapacityError<T>> {
+        match self {
+            Self::Balanced(runtime) => runtime.host_mut().try_spawn(task),
+            Self::Embedded(runtime) => runtime.host_mut().try_spawn(task),
+            Self::Performance(runtime) => runtime.host_mut().try_spawn(task),
         }
     }
 
@@ -269,5 +280,59 @@ where
                 runtime.tick_completions_or_wait(now_ns, max_events, min_events, task_budget)
             }
         }
+    }
+}
+
+impl<D, T, P> RuntimeLoop for ProfiledRuntime<D, T, P>
+where
+    D: ReactorDriver<Event = dataplane_core_reactor::reactor_model::NetEvent, Token = OpToken>
+        + ReactorDriverWait<Error = <D as ReactorDriver>::Error>,
+    T: NativeTask,
+    P: BalancedHostPolicy,
+{
+    type Error = <D as ReactorDriver>::Error;
+    type Submit = D::Submit;
+    type Token = D::Token;
+
+    #[inline]
+    fn tick_completions_or_wait(
+        &mut self,
+        now_ns: u64,
+        max_events: usize,
+        min_events: usize,
+        task_budget: usize,
+    ) -> Result<
+        dataplane_core_reactor::balanced_profile::BalancedCompletionTick,
+        Self::Error,
+    > {
+        ProfiledRuntime::tick_completions_or_wait(self, now_ns, max_events, min_events, task_budget)
+    }
+
+    #[inline]
+    fn submit_if_idle(
+        &mut self,
+        inflight: &mut Option<Self::Token>,
+        op: Self::Submit,
+        wake: WakeHandle,
+    ) -> Result<bool, Self::Error> {
+        ProfiledRuntime::submit_if_idle(self, inflight, op, wake)
+    }
+
+    #[inline]
+    fn submit_and_flush_token(
+        &mut self,
+        op: Self::Submit,
+        wake: WakeHandle,
+    ) -> Result<Self::Token, Self::Error> {
+        ProfiledRuntime::submit_and_flush_token(self, op, wake)
+    }
+
+    #[inline]
+    fn poll(
+        &mut self,
+        wait: bool,
+        max_events: usize,
+    ) -> Result<Vec<ReactorCompletion>, Self::Error> {
+        ProfiledRuntime::poll(self, wait, max_events)
     }
 }

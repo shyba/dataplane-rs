@@ -7,7 +7,7 @@ use crate::balanced_profile::{
 use crate::host_loop::HostLoop;
 use crate::native_task::NativeTask;
 use crate::reactor_driver::ReactorDriver;
-use dataplane_topology::{QueueProfile, ShardGroup, TopologyProfile};
+use dataplane_topology::{ProfileKind, ShardGroup, TopologyProfile};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BalancedShardRole {
@@ -71,7 +71,7 @@ pub struct PerformanceProfileLayout {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EmbeddedProfilePolicy {
     pub shard_count: usize,
-    pub queue_profile: QueueProfile,
+    pub queue_profile: ProfileKind,
     pub budgets: BalancedProfileBudgets,
     pub timer_owner: BalancedTimerOwnerConfig,
     pub park_slots: BalancedParkSlotsConfig,
@@ -302,7 +302,7 @@ impl EmbeddedProfileLayout {
     pub fn policy(&self) -> EmbeddedProfilePolicy {
         EmbeddedProfilePolicy {
             shard_count: self.profile().shard_count,
-            queue_profile: self.profile().queue_profile,
+            queue_profile: self.profile().profile_kind,
             budgets: self.budgets(),
             timer_owner: self.timer_owner_config(),
             park_slots: self.park_slots_config(),

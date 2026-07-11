@@ -1,4 +1,4 @@
-//! Result queue management for runtime shard.
+//! Delivery-agnostic result queue management for runtime shards.
 //!
 //! Extracts ResultEvent, ResultReduceState, ResultBatchSlot, and ResultReduceTrigger
 //! from runtime.rs to enable independent evolution of result batching logic.
@@ -8,7 +8,6 @@
 
 use std::collections::VecDeque;
 
-use crate::runtime_adapter::{AsyncReplyPayload, ResultTarget};
 
 /// Private view struct for result queue state on ShardState.
 ///
@@ -21,7 +20,7 @@ use crate::runtime_adapter::{AsyncReplyPayload, ResultTarget};
 ///
 /// NOTE: This type is private to the native runtime crate.
 /// Do not widen its visibility beyond what current call sites require.
-pub(super) struct ResultFacet {
+pub struct ResultFacet {
     result_direct_send: bool,
     pending_len: usize,
     reducer_scheduled: bool,
@@ -30,7 +29,7 @@ pub(super) struct ResultFacet {
 
 impl ResultFacet {
     /// Constructs a new ResultFacet from the given result queue fields.
-    pub(super) fn new(
+    pub fn new(
         result_direct_send: bool,
         pending_len: usize,
         reducer_scheduled: bool,
@@ -46,7 +45,7 @@ impl ResultFacet {
 
     /// Returns true when the result send path is ready for a direct handoff,
     /// meaning no batching, no pending reduce, and no reducer task is scheduled.
-    pub(super) fn direct_send_ready(&self) -> bool {
+    pub fn direct_send_ready(&self) -> bool {
         result_direct_send_ready(
             self.result_direct_send,
             self.pending_len,
@@ -61,7 +60,7 @@ impl ResultFacet {
     /// for the first three arguments; the caller provides trigger, CQE count,
     /// first_result_ns, and the current timestamp.
     #[inline]
-    pub(super) fn should_reduce(
+    pub fn should_reduce(
         &self,
         trigger: ResultReduceTrigger,
         result_reduce_cqes: usize,
@@ -85,7 +84,7 @@ impl ResultFacet {
     /// any state. The caller is responsible for applying `reducer_scheduled = true`
     /// and enqueueing the callback when `ReduceResults` is returned.
     #[inline]
-    pub(super) fn schedule_outcome(
+    pub fn schedule_outcome(
         &self,
         trigger: ResultReduceTrigger,
         result_reduce_cqes: usize,
@@ -100,9 +99,9 @@ impl ResultFacet {
     }
 }
 
-pub(super) const RESULT_REDUCE_CQE_TRIGGER: usize = 128;
-pub(super) const RESULT_REDUCE_AGE_NS: u64 = 20_000;
-pub(super) const RESULT_SEND_BATCH_LIMIT: usize = 64;
+pub const RESULT_REDUCE_CQE_TRIGGER: usize = 128;
+pub const RESULT_REDUCE_AGE_NS: u64 = 20_000;
+pub const RESULT_SEND_BATCH_LIMIT: usize = 64;
 
 /// Returns true when the result send path is ready for a direct handoff,
 /// meaning no batching, no pending reduce, and no reducer task is scheduled.
@@ -110,7 +109,7 @@ pub(super) const RESULT_SEND_BATCH_LIMIT: usize = 64;
 /// This is a pure predicate on 4 scalars - no mutable state required.
 /// Canonical implementation for ShardState::result_direct_send_ready.
 #[inline]
-pub(super) fn result_direct_send_ready(
+pub fn result_direct_send_ready(
     result_direct_send: bool,
     pending_len: usize,
     reducer_scheduled: bool,
@@ -121,7 +120,7 @@ pub(super) fn result_direct_send_ready(
 
 /// Trigger for scheduling result reduction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ResultReduceTrigger {
+pub enum ResultReduceTrigger {
     Cqe,
     Age,
     Idle,
@@ -130,7 +129,7 @@ pub(super) enum ResultReduceTrigger {
 /// Outcome of a result callback scheduling decision.
 /// Represents what callback, if any, should be enqueued as a result of a scheduling decision.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ResultCallbackOutcome {
+pub enum ResultCallbackOutcome {
     /// No callback was scheduled.
     None,
     /// A ReduceResults callback should be enqueued.
@@ -146,32 +145,42 @@ impl From<ResultCallbackOutcome> for bool {
     }
 }
 
-/// A single result event pending reduction.
-pub(super) struct ResultEvent {
-    pub(super) target: ResultTarget,
-    pub(super) request_id: u64,
-    pub(super) payload: AsyncReplyPayload,
-    pub(super) enqueued_raw: u64,
+/// A single result event pending reduction, generic over the delivery
+/// target and payload types supplied by the embedding runtime.
+pub struct ResultEvent<Target, Payload> {
+    pub target: Target,
+    pub request_id: u64,
+    pub payload: Payload,
+    pub enqueued_raw: u64,
 }
 
 /// State machine for result reduction scheduling.
-#[derive(Default)]
-pub(super) struct ResultReduceState {
-    pub(super) pending: VecDeque<ResultEvent>,
-    pub(super) first_result_ns: Option<u64>,
-    pub(super) reducer_scheduled: bool,
+pub struct ResultReduceState<Target, Payload> {
+    pub pending: VecDeque<ResultEvent<Target, Payload>>,
+    pub first_result_ns: Option<u64>,
+    pub reducer_scheduled: bool,
+}
+
+impl<Target, Payload> Default for ResultReduceState<Target, Payload> {
+    fn default() -> Self {
+        Self {
+            pending: VecDeque::new(),
+            first_result_ns: None,
+            reducer_scheduled: false,
+        }
+    }
 }
 
 /// A batch slot for results destined for a specific target.
-pub(super) struct ResultBatchSlot {
-    pub(super) target: ResultTarget,
-    pub(super) entries: VecDeque<(u64, AsyncReplyPayload, u64)>,
-    pub(super) send_queued: bool,
+pub struct ResultBatchSlot<Target, Payload> {
+    pub target: Target,
+    pub entries: VecDeque<(u64, Payload, u64)>,
+    pub send_queued: bool,
 }
 
-impl ResultBatchSlot {
+impl<Target, Payload> ResultBatchSlot<Target, Payload> {
     /// Creates a new batch slot for the given result target.
-    pub(super) fn new(target: ResultTarget) -> Self {
+    pub fn new(target: Target) -> Self {
         Self {
             target,
             entries: VecDeque::new(),
@@ -182,7 +191,7 @@ impl ResultBatchSlot {
     /// Returns true if this batch slot has entries ready to be sent and is not already queued.
     /// This is the pure queue predicate for result batch slot readiness.
     #[inline]
-    pub(super) fn queue_ready(&self) -> bool {
+    pub fn queue_ready(&self) -> bool {
         !self.send_queued && !self.entries.is_empty()
     }
 }
@@ -193,7 +202,7 @@ impl ResultBatchSlot {
 ///
 /// Pure predicate - no mutable state modified.
 #[inline]
-pub(super) fn reduce_scheduling_predicate(
+pub fn reduce_scheduling_predicate(
     trigger: ResultReduceTrigger,
     pending_len: usize,
     reducer_scheduled: bool,
@@ -221,12 +230,10 @@ mod tests {
         reduce_scheduling_predicate, result_direct_send_ready, ResultBatchSlot,
         ResultCallbackOutcome, ResultReduceState, ResultReduceTrigger,
     };
-    use crate::runtime_adapter::{AsyncReplyPayload, ResultTarget};
-    use std::sync::mpsc;
 
     #[test]
     fn result_reduce_state_default() {
-        let state = ResultReduceState::default();
+        let state = ResultReduceState::<u8, u8>::default();
         assert!(state.pending.is_empty());
         assert!(state.first_result_ns.is_none());
         assert!(!state.reducer_scheduled);
@@ -252,7 +259,7 @@ mod tests {
 
     #[test]
     fn result_reduce_state_reducer_scheduled_default_false() {
-        let state = ResultReduceState::default();
+        let state = ResultReduceState::<u8, u8>::default();
         assert!(!state.reducer_scheduled);
     }
 
@@ -331,12 +338,11 @@ mod tests {
 
     #[test]
     fn result_batch_slot_queue_ready_requires_entries_and_unqueued_state() {
-        let (tx, _rx) = mpsc::sync_channel(1);
-        let mut slot = ResultBatchSlot::new(ResultTarget::SyncUnit(tx));
+        let mut slot: ResultBatchSlot<u8, u8> = ResultBatchSlot::new(7);
 
         assert!(!slot.queue_ready());
 
-        slot.entries.push_back((1, AsyncReplyPayload::Ok, 0));
+        slot.entries.push_back((1, 0, 0));
         assert!(slot.queue_ready());
 
         slot.send_queued = true;

@@ -23,8 +23,65 @@ jobs:
           set -eu
           cargo tree -p dataplane-reactor --edges normal | tee reactor-tree.txt
           ! grep -q "dataplane-runtime" reactor-tree.txt
+      - name: Check runtime-tools stays bin/bench-only
+        run: |
+          set -eu
+          ! grep -R -n 'runtime-tools\|runtime_tools' crates/dataplane-reactor/src --include='*.rs' --exclude-dir=bin
       - name: Check SCD41 recovery shape
         run: |
           set -eu
           ! grep -n "recover_or_initialize.*unwrap_or_else" crates/dataplane-rp2040-scd41-smoke/src/firmware.rs
           grep -n "storage recovery failed; entering BOOTSEL" crates/dataplane-rp2040-scd41-smoke/src/firmware.rs
+
+  core-crates-build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Test core crates with default features
+        run: |
+          set -eu
+          cargo test -p dataplane-topology
+          cargo test -p dataplane-core-reactor-alloc
+          cargo test -p dataplane-core-reactor
+          cargo test -p dataplane-runtime
+          cargo test -p dataplane-reactor
+          cargo test -p dataplane-uring
+          cargo test -p dataplane
+          cargo build -p dataplane --example hello_tasks
+
+  feature-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: core-reactor no-default
+            cmd: cargo check -p dataplane-core-reactor --no-default-features
+          - name: runtime no-default
+            cmd: cargo check -p dataplane-runtime --no-default-features
+          - name: runtime scheduler-shares
+            cmd: cargo check -p dataplane-runtime --no-default-features --features host-runtime,scheduler-shares
+          - name: runtime erlang-nif
+            cmd: cargo check -p dataplane-runtime --features erlang-nif
+          - name: reactor runtime-tools
+            cmd: cargo check -p dataplane-reactor --features runtime-tools
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: ${{ matrix.name }}
+        run: ${{ matrix.cmd }}
+
+  embedded-target-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv6m-none-eabi
+      - name: Check no_std feature combinations on thumbv6m
+        run: |
+          set -eu
+          cargo check -p dataplane-core-reactor --no-default-features --features noalloc --target thumbv6m-none-eabi
+          cargo check -p dataplane-runtime --no-default-features --features noalloc --target thumbv6m-none-eabi
+          cargo check -p dataplane-runtime --no-default-features --features rp2040-integration --target thumbv6m-none-eabi

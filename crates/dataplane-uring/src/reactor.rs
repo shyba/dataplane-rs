@@ -3,48 +3,48 @@ use slab::Slab;
 use socket2::{Domain, Protocol, SockRef, Socket, Type};
 use std::os::fd::{BorrowedFd, RawFd};
 
-use crate::errors::{NifError, Result};
-use crate::runtime_topology::{ProfileKind, TopologyProfile};
-use crate::socket::NetAddr;
+use dataplane_runtime::errors::{NifError, Result};
+use dataplane_runtime::runtime_topology::{ProfileKind, TopologyProfile};
+use dataplane_runtime::runtime_protocol::NetAddr;
 
-pub(super) const DEFAULT_SHARDS_MAX: usize = 256;
-pub(super) const DEFAULT_RING_SIZE: u32 = 4096;
-pub(super) const BUF_SIZE: usize = 64 * 1024;
-pub(super) const SUBSCRIBE_PAGE_SIZE: usize = 4096;
-pub(super) const DEFAULT_SUBSCRIBE_PAGES_PER_SHARD: usize = 256;
-pub(super) const DEFAULT_LOCKED_READ_BUFS_PER_SHARD: usize = 8;
-pub(super) const DEFAULT_PROVIDED_RECV_BUFS_PER_SHARD: usize = 128;
-pub(super) const LISTEN_BACKLOG_DEFAULT: i32 = 1024;
-pub(super) const CHANNEL_CAPACITY: usize = 4096;
-pub(super) const CONN_READ_POLL_MASK: u32 =
+pub const DEFAULT_SHARDS_MAX: usize = 256;
+pub const DEFAULT_RING_SIZE: u32 = 4096;
+pub const BUF_SIZE: usize = 64 * 1024;
+pub const SUBSCRIBE_PAGE_SIZE: usize = 4096;
+pub const DEFAULT_SUBSCRIBE_PAGES_PER_SHARD: usize = 256;
+pub const DEFAULT_LOCKED_READ_BUFS_PER_SHARD: usize = 8;
+pub const DEFAULT_PROVIDED_RECV_BUFS_PER_SHARD: usize = 128;
+pub const LISTEN_BACKLOG_DEFAULT: i32 = 1024;
+pub const CHANNEL_CAPACITY: usize = 4096;
+pub const CONN_READ_POLL_MASK: u32 =
     (libc::POLLIN | libc::POLLERR | libc::POLLHUP | libc::POLLRDHUP) as u32;
-pub(super) const CONN_WRITE_POLL_MASK: u32 =
+pub const CONN_WRITE_POLL_MASK: u32 =
     (libc::POLLOUT | libc::POLLERR | libc::POLLHUP | libc::POLLRDHUP) as u32;
 const OP_SLOT_GENERATION_MIN: u32 = 1;
 const LOCKED_READ_BUF_MIN_GENERATION: u32 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum SqpollMode {
+pub enum SqpollMode {
     Off,
     Try,
     Require,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum SqpollCpu {
+pub enum SqpollCpu {
     None,
     Shard,
     Fixed(usize),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct SqpollConfig {
-    pub(super) mode: SqpollMode,
-    pub(super) cpu: SqpollCpu,
-    pub(super) idle_ms: u32,
+pub struct SqpollConfig {
+    pub mode: SqpollMode,
+    pub cpu: SqpollCpu,
+    pub idle_ms: u32,
 }
 
-pub(super) fn configured_shard_count() -> usize {
+pub fn configured_shard_count() -> usize {
     std::env::var("RANCH_URING_SHARDS")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
@@ -56,7 +56,7 @@ pub(super) fn configured_shard_count() -> usize {
         })
 }
 
-pub(super) fn configured_topology_profile(shards: usize) -> TopologyProfile {
+pub fn configured_topology_profile(shards: usize) -> TopologyProfile {
     let profile_kind = match std::env::var("RANCH_URING_PROFILE")
         .ok()
         .as_deref()
@@ -93,47 +93,47 @@ fn configured_cpu_allowlist() -> Option<Vec<usize>> {
     }
 }
 
-pub(super) fn configured_ring_size() -> u32 {
+pub fn configured_ring_size() -> u32 {
     std::env::var("RANCH_URING_RING_DEPTH")
         .ok()
         .and_then(|s| s.parse::<u32>().ok())
         .unwrap_or(DEFAULT_RING_SIZE)
 }
 
-pub(super) fn configured_locked_read_bufs_per_shard() -> usize {
+pub fn configured_locked_read_bufs_per_shard() -> usize {
     std::env::var("RANCH_URING_LOCKED_READ_BUFS")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(DEFAULT_LOCKED_READ_BUFS_PER_SHARD)
 }
 
-pub(super) fn configured_provided_recv_bufs_per_shard() -> usize {
+pub fn configured_provided_recv_bufs_per_shard() -> usize {
     std::env::var("RANCH_URING_PROVIDED_RECV_BUFS")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(DEFAULT_PROVIDED_RECV_BUFS_PER_SHARD)
 }
 
-pub(super) fn configured_subscribe_pages_per_shard() -> usize {
+pub fn configured_subscribe_pages_per_shard() -> usize {
     std::env::var("RANCH_URING_SUBSCRIBE_PAGES")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(DEFAULT_SUBSCRIBE_PAGES_PER_SHARD)
 }
 
-pub(super) fn configured_chunk_arena_slots() -> Option<usize> {
+pub fn configured_chunk_arena_slots() -> Option<usize> {
     std::env::var("RANCH_URING_CHUNK_ARENA_SLOTS")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
 }
 
-pub(super) fn configured_subscribe_arena_slots() -> Option<usize> {
+pub fn configured_subscribe_arena_slots() -> Option<usize> {
     std::env::var("RANCH_URING_SUBSCRIBE_ARENA_SLOTS")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
 }
 
-pub(super) fn configured_sqpoll_config() -> SqpollConfig {
+pub fn configured_sqpoll_config() -> SqpollConfig {
     let mode_env = std::env::var("RANCH_URING_SQPOLL")
         .ok()
         .map(|s| s.trim().to_ascii_lowercase());
@@ -160,7 +160,7 @@ pub(super) fn configured_sqpoll_config() -> SqpollConfig {
     SqpollConfig { mode, cpu, idle_ms }
 }
 
-pub(super) fn configured_register_subscribe_arena() -> bool {
+pub fn configured_register_subscribe_arena() -> bool {
     match std::env::var("RANCH_URING_REGISTER_SUBSCRIBE_ARENA")
         .ok()
         .as_deref()
@@ -172,7 +172,7 @@ pub(super) fn configured_register_subscribe_arena() -> bool {
     }
 }
 
-pub(super) fn memlock_limit_bytes() -> Result<usize> {
+pub fn memlock_limit_bytes() -> Result<usize> {
     let mut lim = libc::rlimit {
         rlim_cur: 0,
         rlim_max: 0,
@@ -191,7 +191,7 @@ pub(super) fn memlock_limit_bytes() -> Result<usize> {
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum BufPoolKind {
+pub enum BufPoolKind {
     RegisteredRead,
     ProvidedRecv,
 }
@@ -199,7 +199,7 @@ pub(super) enum BufPoolKind {
 #[allow(dead_code)]
 impl BufPoolKind {
     #[inline]
-    pub(super) const fn tag(self) -> u8 {
+    pub const fn tag(self) -> u8 {
         match self {
             Self::RegisteredRead => 1,
             Self::ProvidedRecv => 2,
@@ -209,16 +209,16 @@ impl BufPoolKind {
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct BufSlotId {
-    pub(super) pool: BufPoolKind,
-    pub(super) index: u16,
-    pub(super) generation: u32,
+pub struct BufSlotId {
+    pub pool: BufPoolKind,
+    pub index: u16,
+    pub generation: u32,
 }
 
 #[allow(dead_code)]
 impl BufSlotId {
     #[inline]
-    pub(super) const fn new(pool: BufPoolKind, index: u16, generation: u32) -> Self {
+    pub const fn new(pool: BufPoolKind, index: u16, generation: u32) -> Self {
         Self {
             pool,
             index,
@@ -227,14 +227,14 @@ impl BufSlotId {
     }
 
     #[inline]
-    pub(super) const fn is_valid(self) -> bool {
+    pub const fn is_valid(self) -> bool {
         self.generation != 0
     }
 }
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum BufSlotState {
+pub enum BufSlotState {
     Free,
     Leased,
     InFlight,
@@ -243,20 +243,20 @@ pub(super) enum BufSlotState {
 
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum PoolLifetimeState {
+pub enum PoolLifetimeState {
     Active,
     Draining,
     Removed,
 }
 
-pub(super) struct LockedReadBufPool {
+pub struct LockedReadBufPool {
     slots: Vec<LockedReadBufSlot>,
     free: Vec<u16>,
     slot_bytes: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum LockedReadReleaseError {
+pub enum LockedReadReleaseError {
     InvalidSlotIdentity,
 }
 
@@ -273,7 +273,7 @@ struct RegisteredReadSlotDescriptor {
 }
 
 impl LockedReadBufPool {
-    pub(super) fn new(slots: usize) -> Result<Self> {
+    pub fn new(slots: usize) -> Result<Self> {
         let mut storage = Vec::with_capacity(slots);
         let mut free = Vec::with_capacity(slots);
         for idx in 0..slots {
@@ -298,7 +298,7 @@ impl LockedReadBufPool {
         })
     }
 
-    pub(super) fn acquire_fixed_slot(&mut self) -> Option<BufSlotId> {
+    pub fn acquire_fixed_slot(&mut self) -> Option<BufSlotId> {
         let index = self.free.pop()?;
         let slot = self.slots.get_mut(index as usize)?;
         if slot.leased {
@@ -312,7 +312,7 @@ impl LockedReadBufPool {
         ))
     }
 
-    pub(super) fn release_fixed_slot(
+    pub fn release_fixed_slot(
         &mut self,
         slot_id: BufSlotId,
     ) -> std::result::Result<(), LockedReadReleaseError> {
@@ -325,24 +325,24 @@ impl LockedReadBufPool {
         Ok(())
     }
 
-    pub(super) fn fallback_buf(&self) -> Vec<u8> {
+    pub fn fallback_buf(&self) -> Vec<u8> {
         vec![0u8; self.slot_bytes]
     }
 
-    pub(super) fn fixed_slot_ptr(&mut self, slot_id: BufSlotId) -> Option<*mut u8> {
+    pub fn fixed_slot_ptr(&mut self, slot_id: BufSlotId) -> Option<*mut u8> {
         Some(self.fixed_slot_mut(slot_id)?.buf.as_mut_ptr())
     }
 
-    pub(super) fn fixed_slot_slice(&self, slot_id: BufSlotId) -> Option<&[u8]> {
+    pub fn fixed_slot_slice(&self, slot_id: BufSlotId) -> Option<&[u8]> {
         Some(&self.fixed_slot(slot_id)?.buf[..])
     }
 
-    pub(super) fn fixed_slot_len(&self, slot_id: BufSlotId) -> Option<usize> {
+    pub fn fixed_slot_len(&self, slot_id: BufSlotId) -> Option<usize> {
         Some(self.fixed_slot(slot_id)?.buf.len())
     }
 
     #[inline]
-    pub(super) fn registered_read_index(&self, slot_id: BufSlotId) -> Option<u16> {
+    pub fn registered_read_index(&self, slot_id: BufSlotId) -> Option<u16> {
         let _ = self.fixed_slot(slot_id)?;
         Some(slot_id.index)
     }
@@ -386,15 +386,15 @@ impl LockedReadBufPool {
         entries
     }
 
-    pub(super) fn registered_iovecs_stable_with_ids(&self) -> Vec<(BufSlotId, libc::iovec)> {
+    pub fn registered_iovecs_stable_with_ids(&self) -> Vec<(BufSlotId, libc::iovec)> {
         self.registered_read_slot_descriptors()
             .into_iter()
             .map(|descriptor| (descriptor.slot_id, descriptor.iov))
             .collect()
     }
 
-    #[cfg(test)]
-    pub(super) fn registered_iovecs_stable(&self) -> Vec<libc::iovec> {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn registered_iovecs_stable(&self) -> Vec<libc::iovec> {
         self.registered_read_slot_descriptors()
             .into_iter()
             .map(|descriptor| descriptor.iov)
@@ -414,8 +414,8 @@ impl Drop for LockedReadBufPool {
     }
 }
 
-pub(super) struct ProvidedRecvPool {
-    pub(super) bgid: u16,
+pub struct ProvidedRecvPool {
+    pub bgid: u16,
     lifetime: PoolLifetimeState,
     remove_queued: bool,
     remove_completed: bool,
@@ -429,7 +429,7 @@ struct ProvidedRecvBufSlot {
 }
 
 impl ProvidedRecvPool {
-    pub(super) fn new(bgid: u16, count: usize) -> Self {
+    pub fn new(bgid: u16, count: usize) -> Self {
         let mut slots = Vec::with_capacity(count);
         for _ in 0..count {
             slots.push(ProvidedRecvBufSlot {
@@ -447,13 +447,13 @@ impl ProvidedRecvPool {
         }
     }
 
-    pub(super) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.slots.len()
     }
 
     #[inline]
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn slot_id_for_bid(&self, bid: u16) -> Option<BufSlotId> {
+    pub fn slot_id_for_bid(&self, bid: u16) -> Option<BufSlotId> {
         self.slots
             .get(bid as usize)
             .map(|_| BufSlotId::new(BufPoolKind::ProvidedRecv, bid, self.slot_generation(bid)))
@@ -461,39 +461,39 @@ impl ProvidedRecvPool {
 
     #[inline]
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn bid_is_valid(&self, bid: u16) -> bool {
+    pub fn bid_is_valid(&self, bid: u16) -> bool {
         self.slots.get(bid as usize).is_some()
     }
 
     #[inline]
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn slot_state_for_bid(&self, bid: u16) -> Option<BufSlotState> {
+    pub fn slot_state_for_bid(&self, bid: u16) -> Option<BufSlotState> {
         self.slots.get(bid as usize).map(|slot| slot.state)
     }
 
     #[inline]
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn slot_is_reusable(&self, bid: u16) -> bool {
+    pub fn slot_is_reusable(&self, bid: u16) -> bool {
         matches!(self.slot_state_for_bid(bid), Some(BufSlotState::Free))
     }
 
-    pub(super) fn is_active(&self) -> bool {
+    pub fn is_active(&self) -> bool {
         self.lifetime == PoolLifetimeState::Active
     }
 
     #[inline]
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn is_draining(&self) -> bool {
+    pub fn is_draining(&self) -> bool {
         self.lifetime == PoolLifetimeState::Draining
     }
 
     #[inline]
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(super) fn is_removed(&self) -> bool {
+    pub fn is_removed(&self) -> bool {
         self.lifetime == PoolLifetimeState::Removed
     }
 
-    pub(super) fn begin_draining(&mut self) {
+    pub fn begin_draining(&mut self) {
         if self.lifetime == PoolLifetimeState::Active {
             self.lifetime = PoolLifetimeState::Draining;
             for slot in &mut self.slots {
@@ -504,18 +504,18 @@ impl ProvidedRecvPool {
         }
     }
 
-    pub(super) fn has_inflight_entries(&self) -> bool {
+    pub fn has_inflight_entries(&self) -> bool {
         self.slots
             .iter()
             .any(|slot| matches!(slot.state, BufSlotState::InFlight))
     }
 
     #[inline]
-    pub(super) fn can_retire(&self) -> bool {
+    pub fn can_retire(&self) -> bool {
         self.lifetime == PoolLifetimeState::Draining && !self.has_inflight_entries()
     }
 
-    pub(super) fn advance_retirement(&mut self) -> bool {
+    pub fn advance_retirement(&mut self) -> bool {
         if self.can_retire() {
             self.lifetime = PoolLifetimeState::Removed;
             if self
@@ -530,7 +530,7 @@ impl ProvidedRecvPool {
         false
     }
 
-    pub(super) fn retire_for_remove(&mut self) -> bool {
+    pub fn retire_for_remove(&mut self) -> bool {
         if self.lifetime != PoolLifetimeState::Draining {
             return false;
         }
@@ -543,11 +543,11 @@ impl ProvidedRecvPool {
         true
     }
 
-    pub(super) fn should_queue_remove(&self) -> bool {
+    pub fn should_queue_remove(&self) -> bool {
         self.lifetime == PoolLifetimeState::Removed && !self.remove_queued && !self.remove_completed
     }
 
-    pub(super) fn mark_remove_queued(&mut self) -> bool {
+    pub fn mark_remove_queued(&mut self) -> bool {
         if !self.should_queue_remove() {
             return false;
         }
@@ -555,21 +555,21 @@ impl ProvidedRecvPool {
         true
     }
 
-    pub(super) fn clear_remove_queued(&mut self) {
+    pub fn clear_remove_queued(&mut self) {
         if !self.remove_completed {
             self.remove_queued = false;
         }
     }
 
-    pub(super) fn mark_remove_completed(&mut self) {
+    pub fn mark_remove_completed(&mut self) {
         self.remove_completed = true;
     }
 
-    pub(super) fn is_teardown_complete(&self) -> bool {
+    pub fn is_teardown_complete(&self) -> bool {
         self.lifetime == PoolLifetimeState::Removed && self.remove_completed
     }
 
-    pub(super) fn resolve_inflight_slot(&self, bid: u16) -> Option<BufSlotId> {
+    pub fn resolve_inflight_slot(&self, bid: u16) -> Option<BufSlotId> {
         let slot = self.slot(bid)?;
         if !matches!(slot.state, BufSlotState::InFlight) {
             return None;
@@ -581,7 +581,7 @@ impl ProvidedRecvPool {
         ))
     }
 
-    pub(super) fn complete_recv(&mut self, slot_id: BufSlotId) -> bool {
+    pub fn complete_recv(&mut self, slot_id: BufSlotId) -> bool {
         let lifetime = self.lifetime;
         let Some(slot) = self.provided_slot_mut(slot_id) else {
             return false;
@@ -597,12 +597,12 @@ impl ProvidedRecvPool {
         true
     }
 
-    pub(super) fn slice(&self, slot_id: BufSlotId, len: usize) -> Option<&[u8]> {
+    pub fn slice(&self, slot_id: BufSlotId, len: usize) -> Option<&[u8]> {
         self.provided_slot(slot_id).map(|slot| &slot.buf[..len])
     }
 
-    #[cfg(test)]
-    pub(super) fn seed_inflight_slot_bytes(&mut self, slot_id: BufSlotId, data: &[u8]) -> bool {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn seed_inflight_slot_bytes(&mut self, slot_id: BufSlotId, data: &[u8]) -> bool {
         let Some(slot) = self.provided_slot_mut(slot_id) else {
             return false;
         };
@@ -613,13 +613,13 @@ impl ProvidedRecvPool {
         true
     }
 
-    #[cfg(test)]
-    pub(super) fn provide_entry(&mut self, bid: u16) -> Option<squeue::Entry> {
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn provide_entry(&mut self, bid: u16) -> Option<squeue::Entry> {
         let slot_id = self.slot_id_for_bid(bid)?;
         self.provide_entry_for_slot(slot_id)
     }
 
-    pub(super) fn provide_entry_for_slot(&mut self, slot_id: BufSlotId) -> Option<squeue::Entry> {
+    pub fn provide_entry_for_slot(&mut self, slot_id: BufSlotId) -> Option<squeue::Entry> {
         if self.lifetime != PoolLifetimeState::Active {
             return None;
         }
@@ -677,7 +677,7 @@ impl ProvidedRecvPool {
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum Op {
+pub enum Op {
     ListenerAccept {
         listener_id: u64,
         armed_ns: u64,
@@ -706,7 +706,7 @@ pub(super) enum Op {
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum RingKind {
+pub enum RingKind {
     Latency,
     Main,
 }
@@ -717,13 +717,13 @@ struct OpSlot {
 }
 
 #[repr(align(64))]
-pub(super) struct OpTable {
+pub struct OpTable {
     slots: Slab<OpSlot>,
     generations: Vec<u32>,
 }
 
 impl OpTable {
-    pub(super) fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             slots: Slab::new(),
             generations: Vec::new(),
@@ -731,21 +731,21 @@ impl OpTable {
     }
 
     #[inline]
-    pub(super) fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.slots.len()
     }
 
     #[inline]
-    pub(super) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.slots.is_empty()
     }
 
     #[inline]
-    pub(super) fn values(&self) -> impl Iterator<Item = &Op> {
+    pub fn values(&self) -> impl Iterator<Item = &Op> {
         self.slots.iter().map(|(_, slot)| &slot.op)
     }
 
-    pub(super) fn insert(&mut self, op: Op) -> u64 {
+    pub fn insert(&mut self, op: Op) -> u64 {
         let vacant = self.slots.vacant_entry();
         let idx = vacant.key();
         if idx >= self.generations.len() {
@@ -756,7 +756,7 @@ impl OpTable {
         encode_token(idx, generation)
     }
 
-    pub(super) fn remove(&mut self, token: u64) -> Option<Op> {
+    pub fn remove(&mut self, token: u64) -> Option<Op> {
         let (idx, generation) = decode_token(token)?;
         self.generations.get(idx)?;
         let slot_generation = self.slots.get(idx)?.generation;
@@ -769,8 +769,8 @@ impl OpTable {
         Some(removed.op)
     }
 
-    #[cfg(test)]
-    pub(super) fn remove_first_matching(
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn remove_first_matching(
         &mut self,
         mut predicate: impl FnMut(&Op) -> bool,
     ) -> Option<Op> {
@@ -1147,7 +1147,7 @@ fn decode_token(token: u64) -> Option<(usize, u32)> {
     Some((idx, generation))
 }
 
-pub(super) fn make_listener(port: u16, backlog: i32) -> Result<Socket> {
+pub fn make_listener(port: u16, backlog: i32) -> Result<Socket> {
     let socket = Socket::new(Domain::IPV6, Type::STREAM, Some(Protocol::TCP))
         .map_err(|e| NifError::from_errno(e.raw_os_error().unwrap_or(libc::EIO)))?;
     socket
@@ -1171,7 +1171,7 @@ pub(super) fn make_listener(port: u16, backlog: i32) -> Result<Socket> {
     Ok(socket)
 }
 
-pub(super) fn local_addr_of_fd(fd: RawFd) -> Result<NetAddr> {
+pub fn local_addr_of_fd(fd: RawFd) -> Result<NetAddr> {
     // SAFETY: caller passes a live socket fd; `BorrowedFd` is used only within this function
     // and never outlives the raw fd ownership held by the caller.
     let borrowed_fd = unsafe { BorrowedFd::borrow_raw(fd) };
@@ -1182,7 +1182,7 @@ pub(super) fn local_addr_of_fd(fd: RawFd) -> Result<NetAddr> {
     net_addr_from_sockaddr(&addr)
 }
 
-pub(super) fn peer_addr_of_fd(fd: RawFd) -> Result<NetAddr> {
+pub fn peer_addr_of_fd(fd: RawFd) -> Result<NetAddr> {
     // SAFETY: caller passes a live socket fd; `BorrowedFd` is used only within this function
     // and never outlives the raw fd ownership held by the caller.
     let borrowed_fd = unsafe { BorrowedFd::borrow_raw(fd) };

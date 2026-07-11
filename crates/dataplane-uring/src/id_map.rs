@@ -12,7 +12,7 @@ use std::hash::{BuildHasherDefault, Hasher};
 /// This avoids the default SipHash overhead for the typical case where keys are
 /// uniformly distributed u64 values.
 #[derive(Default)]
-pub(crate) struct U64Hasher(u64);
+pub struct U64Hasher(u64);
 
 impl Hasher for U64Hasher {
     #[inline]
@@ -37,4 +37,4 @@ impl Hasher for U64Hasher {
 
 /// Alias for `HashMap<u64, V, BuildHasherDefault<U64Hasher>>` — the standard map
 /// type used throughout the runtime for session, listener, and subscription ids.
-pub(crate) type U64Map<V> = HashMap<u64, V, BuildHasherDefault<U64Hasher>>;
+pub type U64Map<V> = HashMap<u64, V, BuildHasherDefault<U64Hasher>>;

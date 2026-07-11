@@ -1,14 +1,14 @@
-use crate::runtime_reactor::{BUF_SIZE, SUBSCRIBE_PAGE_SIZE};
+use crate::reactor::{BUF_SIZE, SUBSCRIBE_PAGE_SIZE};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum ArenaClass {
+pub enum ArenaClass {
     Small4K,
     Large64K,
 }
 
 impl ArenaClass {
     #[inline]
-    pub(super) const fn slot_size(self) -> usize {
+    pub const fn slot_size(self) -> usize {
         match self {
             ArenaClass::Small4K => SUBSCRIBE_PAGE_SIZE,
             ArenaClass::Large64K => BUF_SIZE,
@@ -17,16 +17,16 @@ impl ArenaClass {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct ArenaHandle {
-    pub(super) class: ArenaClass,
-    pub(super) slot: usize,
-    pub(super) off: usize,
-    pub(super) len: usize,
+pub struct ArenaHandle {
+    pub class: ArenaClass,
+    pub slot: usize,
+    pub off: usize,
+    pub len: usize,
 }
 
 impl ArenaHandle {
     #[inline]
-    pub(super) fn new(class: ArenaClass, slot: usize, len: usize) -> Self {
+    pub fn new(class: ArenaClass, slot: usize, len: usize) -> Self {
         Self {
             class,
             slot,
@@ -100,13 +100,13 @@ impl<const SLOT_SIZE: usize> FixedSlotArena<SLOT_SIZE> {
 }
 
 #[repr(align(64))]
-pub(super) struct RuntimeArenas {
+pub struct RuntimeArenas {
     small: FixedSlotArena<SUBSCRIBE_PAGE_SIZE>,
     large: FixedSlotArena<BUF_SIZE>,
 }
 
 impl RuntimeArenas {
-    pub(super) fn new(large_slots: usize, small_slots: usize) -> Self {
+    pub fn new(large_slots: usize, small_slots: usize) -> Self {
         Self {
             small: FixedSlotArena::new(small_slots),
             large: FixedSlotArena::new(large_slots),
@@ -114,7 +114,7 @@ impl RuntimeArenas {
     }
 
     #[inline]
-    pub(super) fn acquire_class(&mut self, class: ArenaClass) -> Option<ArenaHandle> {
+    pub fn acquire_class(&mut self, class: ArenaClass) -> Option<ArenaHandle> {
         let slot = match class {
             ArenaClass::Small4K => self.small.acquire()?,
             ArenaClass::Large64K => self.large.acquire()?,
@@ -123,7 +123,7 @@ impl RuntimeArenas {
     }
 
     #[inline]
-    pub(super) fn acquire_for_len(&mut self, len: usize) -> Option<ArenaHandle> {
+    pub fn acquire_for_len(&mut self, len: usize) -> Option<ArenaHandle> {
         if len <= SUBSCRIBE_PAGE_SIZE {
             if let Some(mut handle) = self.acquire_class(ArenaClass::Small4K) {
                 handle.len = len;
@@ -139,7 +139,7 @@ impl RuntimeArenas {
     }
 
     #[inline]
-    pub(super) fn release(&mut self, handle: ArenaHandle) {
+    pub fn release(&mut self, handle: ArenaHandle) {
         match handle.class {
             ArenaClass::Small4K => self.small.release(handle.slot),
             ArenaClass::Large64K => self.large.release(handle.slot),
@@ -147,12 +147,12 @@ impl RuntimeArenas {
     }
 
     #[inline]
-    pub(super) fn slice_handle(&self, handle: ArenaHandle) -> &[u8] {
+    pub fn slice_handle(&self, handle: ArenaHandle) -> &[u8] {
         self.slice(handle.class, handle.slot, handle.off, handle.len)
     }
 
     #[inline]
-    pub(super) fn slice(&self, class: ArenaClass, slot: usize, off: usize, len: usize) -> &[u8] {
+    pub fn slice(&self, class: ArenaClass, slot: usize, off: usize, len: usize) -> &[u8] {
         match class {
             ArenaClass::Small4K => self.small.slice(slot, off, len),
             ArenaClass::Large64K => self.large.slice(slot, off, len),
@@ -160,7 +160,7 @@ impl RuntimeArenas {
     }
 
     #[inline]
-    pub(super) fn slice_mut_prefix(
+    pub fn slice_mut_prefix(
         &mut self,
         class: ArenaClass,
         slot: usize,
@@ -173,7 +173,7 @@ impl RuntimeArenas {
     }
 
     #[inline]
-    pub(super) fn slice_mut_full(&mut self, handle: ArenaHandle) -> &mut [u8] {
+    pub fn slice_mut_full(&mut self, handle: ArenaHandle) -> &mut [u8] {
         match handle.class {
             ArenaClass::Small4K => self.small.slice_mut_full(handle.slot),
             ArenaClass::Large64K => self.large.slice_mut_full(handle.slot),
@@ -181,11 +181,11 @@ impl RuntimeArenas {
     }
 
     #[inline]
-    pub(super) fn small_len(&self) -> usize {
+    pub fn small_len(&self) -> usize {
         self.small.len()
     }
 
-    pub(super) fn small_registered_iovecs(&self) -> Vec<libc::iovec> {
+    pub fn small_registered_iovecs(&self) -> Vec<libc::iovec> {
         self.small.registered_iovecs()
     }
 }
@@ -193,7 +193,7 @@ impl RuntimeArenas {
 #[cfg(test)]
 mod tests {
     use super::{ArenaClass, RuntimeArenas};
-    use crate::runtime_reactor::{BUF_SIZE, SUBSCRIBE_PAGE_SIZE};
+    use crate::reactor::{BUF_SIZE, SUBSCRIBE_PAGE_SIZE};
 
     #[test]
     fn acquire_for_len_uses_small_then_large_classes() {

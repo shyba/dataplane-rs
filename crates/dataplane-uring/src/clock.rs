@@ -10,16 +10,16 @@ use std::sync::OnceLock;
 static RECEIVE_CLOCK: OnceLock<quanta::Clock> = OnceLock::new();
 
 /// Returns the shared receive-side monotonic clock.
-pub(crate) fn recv_clock() -> &'static quanta::Clock {
+pub fn recv_clock() -> &'static quanta::Clock {
     RECEIVE_CLOCK.get_or_init(quanta::Clock::new)
 }
 
 /// Returns the raw tick value of the receive clock.
-pub(crate) fn recv_clock_raw() -> u64 {
+pub fn recv_clock_raw() -> u64 {
     recv_clock().raw()
 }
 
 /// Returns the elapsed nanoseconds since the given enqueued timestamp.
-pub(crate) fn recv_wait_ns_since(enqueued_raw: u64) -> u64 {
+pub fn recv_wait_ns_since(enqueued_raw: u64) -> u64 {
     recv_clock().delta_as_nanos(enqueued_raw, recv_clock_raw())
 }
