@@ -137,7 +137,14 @@ where
             BalancedHostAction::Continue => host.tick(max_events, task_budget, on_event)?,
             BalancedHostAction::WaitUntil { deadline_ns } => {
                 before_wait_until(deadline_ns);
-                host.tick_or_wait(max_events, min_events, task_budget, on_event)?
+                let timeout_ns = deadline_ns.saturating_sub(now_ns);
+                host.tick_or_wait_deadline(
+                    max_events,
+                    min_events,
+                    task_budget,
+                    Some(timeout_ns),
+                    on_event,
+                )?
             }
             BalancedHostAction::Idle => (0, 0),
         };
@@ -215,7 +222,13 @@ where
             }
             BalancedHostAction::WaitUntil { deadline_ns } => {
                 policy.before_wait_until(deadline_ns);
-                host.tick_completions_or_wait(max_events, min_events, task_budget)?
+                let timeout_ns = deadline_ns.saturating_sub(now_ns);
+                host.tick_completions_or_wait_deadline(
+                    max_events,
+                    min_events,
+                    task_budget,
+                    Some(timeout_ns),
+                )?
             }
             BalancedHostAction::Idle => (Vec::new(), 0),
         };

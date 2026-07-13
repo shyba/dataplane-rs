@@ -33,7 +33,7 @@ fn sample_placements() -> Vec<SchedulerPlacement> {
 fn route_prefers_local_domain_before_remote() {
     let placements = sample_placements();
     let mesh = build_shard_mesh::<TaskCell<u64, 256>>(4, 8).remove(0);
-    let (bus_tx, bus_rx) = kanal::unbounded::<TaskCell<u64, 256>>();
+    let (bus_tx, bus_rx) = kanal::bounded::<TaskCell<u64, 256>>(1024);
     let bus_rx = Arc::new(bus_rx);
     let scheduler = LocalMeshScheduler::<u64, 256>::new(
         placements[0],
@@ -50,7 +50,7 @@ fn route_prefers_local_domain_before_remote() {
 fn domain_scope_offloads_within_domain() {
     let placements = sample_placements();
     let mut mesh = build_shard_mesh::<TaskCell<u64, 256>>(4, 8);
-    let (bus_tx, bus_rx) = kanal::unbounded::<TaskCell<u64, 256>>();
+    let (bus_tx, bus_rx) = kanal::bounded::<TaskCell<u64, 256>>(1024);
     let bus_rx = Arc::new(bus_rx);
 
     let cfg = ShardSchedulerConfig {
@@ -114,7 +114,7 @@ fn mesh_spill_capacity_is_hard_limit() {
 fn low_priority_local_task_falls_back_to_bus_when_full() {
     let placements = sample_placements();
     let mesh = build_shard_mesh::<TaskCell<u64, 256>>(4, 8).remove(0);
-    let (bus_tx, bus_rx) = kanal::unbounded::<TaskCell<u64, 256>>();
+    let (bus_tx, bus_rx) = kanal::bounded::<TaskCell<u64, 256>>(1024);
     let bus_rx = Arc::new(bus_rx);
 
     let mut scheduler = LocalMeshScheduler::<u64, 256>::new(
@@ -142,7 +142,7 @@ fn low_priority_local_task_falls_back_to_bus_when_full() {
 fn async_task_runs_via_boxed_future() {
     let placements = sample_placements();
     let mesh = build_shard_mesh::<TaskCell<u64, 256>>(4, 8).remove(0);
-    let (bus_tx, bus_rx) = kanal::unbounded::<TaskCell<u64, 256>>();
+    let (bus_tx, bus_rx) = kanal::bounded::<TaskCell<u64, 256>>(1024);
     let bus_rx = Arc::new(bus_rx);
     let mut scheduler = LocalMeshScheduler::<u64, 256>::new(
         placements[0],

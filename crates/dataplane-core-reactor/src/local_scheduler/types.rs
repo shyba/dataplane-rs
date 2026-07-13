@@ -129,6 +129,8 @@ pub struct TickReport {
     pub bus_drained: usize,
     pub offloaded: usize,
     pub bus_deferred: usize,
+    /// Low-priority deferrals rejected because the (bounded) bus was full.
+    pub bus_rejected: usize,
     pub dropped: usize,
     pub focus_exit_all_done: usize,
     pub focus_exit_complete: usize,

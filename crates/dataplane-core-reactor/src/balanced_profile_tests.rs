@@ -16,6 +16,7 @@ use crate::reactor_runtime::ReactorRuntime;
 struct DummyDriver {
     outstanding: usize,
     wait_calls: Vec<usize>,
+    deadline_calls: Vec<Option<u64>>,
 }
 
 struct CountTask {
@@ -71,6 +72,15 @@ impl ReactorDriverWait for DummyDriver {
         self.wait_calls.push(min_events);
         self.outstanding = 0;
         Ok(1)
+    }
+
+    fn wait_deadline(
+        &mut self,
+        min_events: usize,
+        timeout_ns: Option<u64>,
+    ) -> Result<usize, Self::Error> {
+        self.deadline_calls.push(timeout_ns);
+        self.wait(min_events)
     }
 }
 
@@ -171,6 +181,7 @@ fn embedded_controller_try_arm_park_returns_explicit_exhaustion_error() {
         EmbeddedTimerStore::from_config(BalancedTimerOwnerConfig {
             initial_capacity: 1,
             wake_batch: 1,
+            max_entries: None,
         }),
         EmbeddedParkStore::from_config(BalancedParkSlotsConfig { slot_count: 1 }),
     );
@@ -191,6 +202,7 @@ fn embedded_controller_try_arm_timer_returns_explicit_capacity_error() {
         EmbeddedTimerStore::from_config(BalancedTimerOwnerConfig {
             initial_capacity: 1,
             wake_batch: 1,
+            max_entries: None,
         }),
         EmbeddedParkStore::from_config(BalancedParkSlotsConfig { slot_count: 2 }),
     );
@@ -217,6 +229,7 @@ fn embedded_timer_store_arm_returns_capacity_error_through_generic_controller_pa
         EmbeddedTimerStore::from_config(BalancedTimerOwnerConfig {
             initial_capacity: 1,
             wake_batch: 1,
+            max_entries: None,
         }),
         EmbeddedParkStore::from_config(BalancedParkSlotsConfig { slot_count: 2 }),
     );
@@ -446,6 +459,7 @@ fn timer_owner_keeps_earliest_deadline_visible() {
     let mut owner = BalancedTimerOwner::from_config(BalancedTimerOwnerConfig {
         initial_capacity: 4,
         wake_batch: 4,
+        max_entries: None,
     });
     let mut slots = BalancedParkSlots::from_config(BalancedParkSlotsConfig { slot_count: 2 });
     let late = slots.arm_next(BalancedWakeToken(10)).expect("late lease");
@@ -462,6 +476,7 @@ fn timer_owner_drains_only_expired_entries_up_to_batch() {
     let mut owner = BalancedTimerOwner::from_config(BalancedTimerOwnerConfig {
         initial_capacity: 4,
         wake_batch: 2,
+        max_entries: None,
     });
     let mut slots = BalancedParkSlots::from_config(BalancedParkSlotsConfig { slot_count: 3 });
     let a = slots.arm_next(BalancedWakeToken(1)).expect("lease a");
@@ -497,6 +512,7 @@ fn controller_waits_on_next_deadline_when_no_other_work_exists() {
         BalancedTimerOwner::from_config(BalancedTimerOwnerConfig {
             initial_capacity: 4,
             wake_batch: 2,
+            max_entries: None,
         }),
         BalancedParkSlots::from_config(BalancedParkSlotsConfig { slot_count: 2 }),
     );
@@ -521,6 +537,7 @@ fn controller_processes_expired_timers_before_idling() {
         BalancedTimerOwner::from_config(BalancedTimerOwnerConfig {
             initial_capacity: 4,
             wake_batch: 4,
+            max_entries: None,
         }),
         BalancedParkSlots::from_config(BalancedParkSlotsConfig { slot_count: 2 }),
     );
@@ -568,6 +585,7 @@ fn controller_step_precedence_is_runtime_then_timers_then_tasks_then_wait() {
         BalancedTimerOwner::from_config(BalancedTimerOwnerConfig {
             initial_capacity: 4,
             wake_batch: 4,
+            max_entries: None,
         }),
         BalancedParkSlots::from_config(BalancedParkSlotsConfig { slot_count: 2 }),
     );
@@ -654,7 +672,7 @@ fn host_adapter_continues_when_runtime_work_is_present() {
     let mut host = HostLoop::new(
         ReactorRuntime::new(DummyDriver {
             outstanding: 1,
-            wait_calls: Vec::new(),
+            ..DummyDriver::default()
         }),
         NativeTaskEngine::<CountTask>::with_task_capacity(4),
     );
@@ -918,5 +936,37 @@ fn embedded_runtime_try_arm_park_surfaces_explicit_exhaustion_error() {
     assert_eq!(
         runtime.try_arm_park(BalancedWakeToken(slot_count as u64 + 1)),
         Err(EmbeddedResourceError::ParkSlotsExhausted)
+    );
+}
+
+#[test]
+fn io_idle_wait_is_bounded_by_armed_timer_deadline() {
+    let layout = BalancedProfileLayout::reference();
+    let mut controller = layout.make_controller();
+    let lease = controller
+        .park_store_mut()
+        .arm_next(BalancedWakeToken(1))
+        .expect("lease");
+    controller
+        .timer_store_mut()
+        .arm(1_000, lease);
+    let mut adapter = crate::balanced_profile::BalancedHostLoopAdapter::new(controller);
+    let mut host = HostLoop::new(
+        ReactorRuntime::new(DummyDriver::default()),
+        NativeTaskEngine::<CountTask>::with_task_capacity(4),
+    );
+
+    let tick = adapter
+        .tick_or_wait(&mut host, 100, 16, 1, 16, |_event| {}, |_deadline| {})
+        .expect("tick");
+
+    assert_eq!(
+        tick.controller_step.host_action,
+        BalancedHostAction::WaitUntil { deadline_ns: 1_000 }
+    );
+    assert_eq!(
+        host.runtime().driver().deadline_calls,
+        vec![Some(900)],
+        "driver wait must be bounded by deadline - now"
     );
 }

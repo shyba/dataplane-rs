@@ -55,6 +55,11 @@ impl<Op, const STACK_BYTES: usize, Focus: FocusPolicy, Push: PushPolicy>
         config: ShardSchedulerConfig,
     ) -> Self {
         let by_shard = normalize_placements(placements);
+        debug_assert!(
+            bus_tx.is_bounded(),
+            "LocalMeshScheduler requires a bounded bus channel; an unbounded \
+             bus has no backpressure and grows without limit under overload"
+        );
         assert!(
             shard.shard < by_shard.len(),
             "shard is outside placement set"
@@ -157,8 +162,12 @@ impl<Op, const STACK_BYTES: usize, Focus: FocusPolicy, Push: PushPolicy>
             Err(returned) => {
                 task = returned;
                 if task.meta.priority == TaskPriority::Low {
-                    let _ = self.bus_tx.send(task);
-                    Ok(SubmitPlacement::BusDeferred)
+                    let mut deferred = Some(task);
+                    if matches!(self.bus_tx.try_send_option(&mut deferred), Ok(true)) {
+                        Ok(SubmitPlacement::BusDeferred)
+                    } else {
+                        Err(deferred.take().expect("task retained on failed bus send"))
+                    }
                 } else {
                     Err(task)
                 }
@@ -338,8 +347,15 @@ impl<Op, const STACK_BYTES: usize, Focus: FocusPolicy, Push: PushPolicy>
                 if let Some(mut removed) = self.tasks.remove(task_id) {
                     removed.stamp(&self.clock, TraceStep::Queued);
                     if removed.meta.priority == TaskPriority::Low {
-                        let _ = self.bus_tx.send(removed);
-                        report.bus_deferred += 1;
+                        let mut deferred = Some(removed);
+                        if matches!(self.bus_tx.try_send_option(&mut deferred), Ok(true)) {
+                            report.bus_deferred += 1;
+                        } else {
+                            let requeued = deferred.take().expect("task retained on failed bus send");
+                            let id = self.tasks.insert(requeued);
+                            self.ready.push_back(id);
+                            report.bus_rejected += 1;
+                        }
                     } else {
                         self.ready.push_back(task_id);
                         let id = self.tasks.insert(removed);
@@ -505,9 +521,16 @@ impl<Op, const STACK_BYTES: usize, Focus: FocusPolicy, Push: PushPolicy>
             Err(returned) => {
                 task = returned;
                 if task.meta.priority == TaskPriority::Low {
-                    let _ = self.bus_tx.send(task);
-                    report.bus_deferred += 1;
+                    let mut deferred = Some(task);
+                    if matches!(self.bus_tx.try_send_option(&mut deferred), Ok(true)) {
+                        report.bus_deferred += 1;
+                    } else {
+                        crate::scheduler_trace!("mesh ingress task dropped: bus full");
+                        report.bus_rejected += 1;
+                        report.dropped += 1;
+                    }
                 } else {
+                    crate::scheduler_trace!("mesh ingress task dropped: no local slot or offload route");
                     report.dropped += 1;
                 }
             }

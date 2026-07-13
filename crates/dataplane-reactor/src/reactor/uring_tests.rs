@@ -2,7 +2,7 @@ use super::UringReactor;
 use crate::reactor::{NetEvent, NetOp, NetOpKind, Reactor, UdpRecvSlot};
 use std::io::Read;
 use std::net::UdpSocket;
-use std::os::fd::{FromRawFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::UnixStream;
 use std::thread;
 use std::time::Duration;
@@ -292,4 +292,75 @@ fn udp_recv_batch_completes_with_single_datagram() {
     assert_eq!(slot.recv_len, payload.len());
     assert_eq!(&recv_buf[..payload.len()], payload);
     assert!(slot.addr_len > 0);
+}
+
+#[test]
+fn wait_deadline_returns_within_timeout_when_io_idle() {
+    use crate::reactor::ReactorDriverWait;
+    let Ok(mut reactor) = UringReactor::new(8) else {
+        return; // no io_uring support in this environment
+    };
+    // Keep one op outstanding so the ring has something to wait on
+    // conceptually, but nothing will complete: a recv on an idle socket.
+    let socket = UdpSocket::bind("127.0.0.1:0").expect("bind");
+    let mut buf = vec![0u8; 64];
+    let op = NetOp::UdpRecv {
+        fd: socket.as_raw_fd(),
+        ptr: buf.as_mut_ptr(),
+        len: buf.len(),
+    };
+    let _ = crate::reactor::Reactor::submit(&mut reactor, op);
+
+    let start = std::time::Instant::now();
+    let waited = reactor.wait_deadline(1, Some(20_000_000));
+    let elapsed = start.elapsed();
+    assert!(waited.is_ok(), "wait_deadline errored: {waited:?}");
+    assert!(
+        elapsed < Duration::from_millis(500),
+        "wait_deadline blocked past its 20ms timeout: {elapsed:?}"
+    );
+}
+
+#[test]
+fn cancel_accept_multi_closes_late_accepted_fds() {
+    use crate::reactor::{EventContext, NetSubscription, NetSubscriptionEvent};
+    use std::net::{TcpListener, TcpStream};
+
+    struct NopHandler;
+    impl crate::reactor::Handler<NetSubscriptionEvent> for NopHandler {
+        fn on_event(&mut self, _cx: &mut EventContext<'_>, _event: NetSubscriptionEvent) {}
+    }
+
+    let Ok(mut reactor) = UringReactor::new(16) else {
+        return;
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr");
+
+    let token = crate::reactor::Reactor::subscribe(
+        &mut reactor,
+        NetSubscription::AcceptMulti {
+            listener_fd: listener.as_raw_fd(),
+            flags: 0,
+        },
+        NopHandler,
+    )
+    .expect("subscribe");
+    let _ = crate::reactor::Reactor::submit_pending(&mut reactor);
+
+    let fds_before = std::fs::read_dir("/proc/self/fd").expect("fd dir").count();
+
+    crate::reactor::Reactor::cancel(&mut reactor, token).expect("cancel");
+    // Connections racing the cancel must not leak their accepted fds.
+    let _conn = TcpStream::connect(addr).expect("connect");
+    for _ in 0..20 {
+        let _ = crate::reactor::Reactor::poll(&mut reactor, false).expect("poll");
+        thread::sleep(Duration::from_millis(5));
+    }
+
+    let fds_after = std::fs::read_dir("/proc/self/fd").expect("fd dir").count();
+    assert!(
+        fds_after <= fds_before + 1,
+        "accepted fds leaked after cancel: before={fds_before} after={fds_after}"
+    );
 }

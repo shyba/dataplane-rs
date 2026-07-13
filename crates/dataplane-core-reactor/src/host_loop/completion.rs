@@ -13,6 +13,7 @@ where
         inflight: &mut InflightTable,
         max_events: usize,
         min_events: usize,
+        timeout_ns: Option<u64>,
     ) -> Result<Vec<ReactorCompletion>, <D as ReactorDriver>::Error>;
 }
 
@@ -26,9 +27,10 @@ where
         inflight: &mut InflightTable,
         max_events: usize,
         min_events: usize,
+        timeout_ns: Option<u64>,
     ) -> Result<Vec<ReactorCompletion>, <D as ReactorDriver>::Error> {
         let mut completions = Vec::new();
-        self.drain_or_wait(max_events, min_events, |event| {
+        self.drain_or_wait_deadline(max_events, min_events, timeout_ns, |event| {
             let completion = ReactorCompletion::from(event);
             let _ = inflight.remove(completion.token);
             completions.push(completion);

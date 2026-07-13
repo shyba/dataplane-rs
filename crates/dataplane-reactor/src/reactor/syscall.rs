@@ -149,6 +149,10 @@ impl SyscallReactor {
     }
 
     fn wait_for_epoll(&mut self) -> bool {
+        self.wait_for_epoll_timeout(-1)
+    }
+
+    fn wait_for_epoll_timeout(&mut self, timeout_ms: i32) -> bool {
         let Some(epoll_fd) = self.epoll_fd else {
             return false;
         };
@@ -160,8 +164,9 @@ impl SyscallReactor {
         // SAFETY: epoll_wait is safe when epoll_fd is valid and events points to
         // a valid slice of epoll_event. The kernel writes up to 64 events into the
         // buffer and returns the count. We own the epoll_fd and close it in drop.
-        let rc =
-            unsafe { libc::epoll_wait(epoll_fd, events.as_mut_ptr(), events.len() as i32, -1) };
+        let rc = unsafe {
+            libc::epoll_wait(epoll_fd, events.as_mut_ptr(), events.len() as i32, timeout_ms)
+        };
         if rc >= 0 {
             return true;
         }
@@ -207,7 +212,9 @@ impl SyscallReactor {
             return Some(res as i32);
         }
         let errno = last_errno();
-        if is_would_block(errno) {
+        // EINTR: the op made no progress; keep it pending and retry on the
+        // next poll rather than surfacing a signal as a hard completion error.
+        if is_would_block(errno) || errno == libc::EINTR {
             None
         } else {
             Some(-errno)
@@ -696,6 +703,38 @@ impl ReactorDriverWait for SyscallReactor {
         }
 
         let events = self.poll(true)?;
+        let count = events.len();
+        self.ready_events.extend(events);
+        Ok(count)
+    }
+
+    fn wait_deadline(
+        &mut self,
+        min_events: usize,
+        timeout_ns: Option<u64>,
+    ) -> Result<usize, Self::Error> {
+        let Some(timeout_ns) = timeout_ns else {
+            return self.wait(min_events);
+        };
+        if !self.ready_events.is_empty() {
+            return Ok(self.ready_events.len());
+        }
+
+        let events = self.poll_once();
+        if events.is_empty() {
+            let timeout_ms = timeout_ns
+                .div_ceil(1_000_000)
+                .min(i32::MAX as u64) as i32;
+            if !self.wait_for_epoll_timeout(timeout_ms) {
+                std::thread::sleep(Duration::from_nanos(
+                    timeout_ns.min(50_000),
+                ));
+            }
+            let events = self.poll_once();
+            let count = events.len();
+            self.ready_events.extend(events);
+            return Ok(count);
+        }
         let count = events.len();
         self.ready_events.extend(events);
         Ok(count)

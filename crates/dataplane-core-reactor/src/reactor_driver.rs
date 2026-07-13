@@ -124,6 +124,21 @@ pub trait ReactorDriverWait {
     /// - `0` means the wait returned without making events ready.
     /// - `n > 0` means this wait made `n` events ready for subsequent drains.
     fn wait(&mut self, min_events: usize) -> Result<usize, Self::Error>;
+
+    /// Waits like [`ReactorDriverWait::wait`], but returns no later than
+    /// `timeout_ns` from now when a timeout is given (used to honor timer
+    /// deadlines while IO-idle). Returning `Ok(0)` on timeout is expected.
+    ///
+    /// The default implementation ignores the timeout and blocks like
+    /// `wait`; drivers used with timer-driven runtimes must override it.
+    fn wait_deadline(
+        &mut self,
+        min_events: usize,
+        timeout_ns: Option<u64>,
+    ) -> Result<usize, Self::Error> {
+        let _ = timeout_ns;
+        self.wait(min_events)
+    }
 }
 
 #[cfg(test)]

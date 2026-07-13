@@ -184,6 +184,9 @@ pub struct NativeTaskEngine<T> {
     free_head: u32,
     active: usize,
     max_slots: Option<usize>,
+    deferred_children: VecDeque<T>,
+    children_dropped: u64,
+    dead_ready_skips: u64,
 }
 
 impl<T> NativeTaskEngine<T>
@@ -219,6 +222,9 @@ where
             free_head: 0,
             active: 0,
             max_slots,
+            deferred_children: VecDeque::new(),
+            children_dropped: 0,
+            dead_ready_skips: 0,
         }
     }
 
@@ -299,7 +305,7 @@ where
             let step = task.step(&mut cx);
             if cx.has_spawned() {
                 cx.drain_spawned(|child| {
-                    self.spawn_child_or_panic(child);
+                    self.spawn_child(child);
                 });
             }
 
@@ -359,7 +365,7 @@ where
                 let spawned = cx.has_spawned();
                 if spawned {
                     cx.drain_spawned(|child| {
-                        self.spawn_child_or_panic(child);
+                        self.spawn_child(child);
                     });
                 }
 
@@ -437,7 +443,7 @@ where
             let step = task.step(&mut cx);
             if cx.has_spawned() {
                 cx.drain_spawned(|child| {
-                    self.spawn_child_or_panic(child);
+                    self.spawn_child(child);
                 });
             }
 
@@ -503,7 +509,7 @@ where
                 let step = task.step(&mut cx);
                 if cx.has_spawned() {
                     cx.drain_spawned(|child| {
-                        self.spawn_child_or_panic(child);
+                        self.spawn_child(child);
                     });
                 }
 
@@ -546,6 +552,7 @@ where
             let task_idx = self.ready.pop_front()?;
             let idx = task_idx as usize;
             if idx >= self.slots.len() || !self.slots[idx].is_live() {
+                self.dead_ready_skips = self.dead_ready_skips.saturating_add(1);
                 continue;
             }
             self.slots[idx].mark_dequeued();
@@ -591,6 +598,11 @@ where
         slot.release_to_free_list(self.free_head);
         self.free_head = idx as u32;
         self.active = self.active.saturating_sub(1);
+        if let Some(child) = self.deferred_children.pop_front() {
+            if let Err(err) = self.try_spawn(child) {
+                self.deferred_children.push_front(err.into_task());
+            }
+        }
     }
 
     fn grow(&mut self) -> bool {
@@ -617,15 +629,41 @@ where
         true
     }
 
+    /// Spawns a child task, deferring it when the slot cap is reached.
+    ///
+    /// Deferred children are installed as slots free up (`release_slot`).
+    /// The deferred queue is itself bounded by `max_slots`; beyond that
+    /// children are dropped and counted in `children_dropped` instead of
+    /// aborting the reactor.
     #[inline(always)]
-    fn spawn_child_or_panic(&mut self, task: T) {
-        if let Err(err) = self.try_spawn(task) {
-            panic!(
-                "native task child spawn capacity exceeded (active={}, max_slots={})",
-                err.active(),
-                err.max_slots()
-            );
+    fn spawn_child(&mut self, task: T) {
+        let Err(err) = self.try_spawn(task) else {
+            return;
+        };
+        let deferred_cap = self.max_slots.unwrap_or(usize::MAX);
+        if self.deferred_children.len() < deferred_cap {
+            self.deferred_children.push_back(err.into_task());
+        } else {
+            self.children_dropped = self.children_dropped.saturating_add(1);
         }
+    }
+
+    /// Number of children waiting for a free slot.
+    #[inline(always)]
+    pub fn deferred_children(&self) -> usize {
+        self.deferred_children.len()
+    }
+
+    /// Children dropped because both the slots and the deferred queue were full.
+    #[inline(always)]
+    pub fn children_dropped(&self) -> u64 {
+        self.children_dropped
+    }
+
+    /// Ready-queue entries skipped because their task slot was already dead.
+    #[inline(always)]
+    pub fn dead_ready_skips(&self) -> u64 {
+        self.dead_ready_skips
     }
 }
 
@@ -872,10 +910,31 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "native task child spawn capacity exceeded")]
-    fn bounded_child_spawn_saturation_fails_instead_of_stranding_hidden_work() {
+    fn bounded_child_spawn_saturation_defers_instead_of_panicking() {
         let mut engine = NativeTaskEngine::with_task_capacity_limit(1, 1);
         engine.spawn(ParkingSpawnerTask);
         let _ = engine.run_budget(1);
+        assert_eq!(engine.active_tasks(), 1);
+        assert_eq!(engine.deferred_children(), 1);
+        assert_eq!(engine.children_dropped(), 0);
+    }
+
+    #[test]
+    fn deferred_child_installs_when_slot_frees() {
+        let mut engine = NativeTaskEngine::with_task_capacity_limit(1, 1);
+        engine.spawn(SpawnerTask { spawn: 1 });
+        let _ = engine.run_budget(4);
+        assert_eq!(engine.deferred_children(), 0);
+        assert_eq!(engine.children_dropped(), 0);
+    }
+
+    #[test]
+    fn deferred_queue_overflow_drops_and_counts() {
+        let mut engine = NativeTaskEngine::with_task_capacity_limit(1, 1);
+        engine.spawn(ParkingSpawnerTask);
+        let _ = engine.run_budget(1);
+        engine.spawn_child(ParkingSpawnerTask);
+        assert_eq!(engine.deferred_children(), 1);
+        assert_eq!(engine.children_dropped(), 1);
     }
 }

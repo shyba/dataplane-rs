@@ -87,6 +87,22 @@ where
         &mut self,
         max_events: usize,
         min_events: usize,
+        on_event: F,
+    ) -> Result<usize, <D as ReactorDriver>::Error>
+    where
+        F: FnMut(D::Event),
+    {
+        self.drain_or_wait_deadline(max_events, min_events, None, on_event)
+    }
+
+    /// Like [`ReactorRuntime::drain_or_wait`], but bounds the blocking wait
+    /// by `timeout_ns` when given, so timer deadlines are honored while
+    /// IO-idle.
+    pub fn drain_or_wait_deadline<F>(
+        &mut self,
+        max_events: usize,
+        min_events: usize,
+        timeout_ns: Option<u64>,
         mut on_event: F,
     ) -> Result<usize, <D as ReactorDriver>::Error>
     where
@@ -97,7 +113,7 @@ where
             return Ok(emitted);
         }
 
-        self.driver.wait(min_events)?;
+        self.driver.wait_deadline(min_events, timeout_ns)?;
         self.drain(max_events, on_event)
     }
 }

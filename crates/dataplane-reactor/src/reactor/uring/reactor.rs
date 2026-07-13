@@ -16,6 +16,7 @@ pub struct UringReactor {
     next_token: u64,
     next_buf_group: u16,
     recvmsg_multi_supported: bool,
+    fixed_buffers_supported: bool,
     pub(super) ready_events: VecDeque<NetEvent>,
     pub(super) token_meta: HashMap<u64, TokenMeta>,
     pub(super) subscriptions: HashMap<SubscriptionToken, SubscriptionState>,
@@ -25,15 +26,18 @@ impl UringReactor {
     pub fn new(entries: u32) -> std::io::Result<Self> {
         let ring = io_uring::IoUring::new(entries)?;
         let mut recvmsg_multi_supported = false;
+        let mut fixed_buffers_supported = false;
         let mut probe = Probe::new();
         if ring.submitter().register_probe(&mut probe).is_ok() {
             recvmsg_multi_supported = probe.is_supported(opcode::RecvMsgMulti::CODE);
+            fixed_buffers_supported = probe.is_supported(opcode::ReadFixed::CODE);
         }
         Ok(Self {
             ring,
             next_token: 1,
             next_buf_group: 1,
             recvmsg_multi_supported,
+            fixed_buffers_supported,
             ready_events: VecDeque::new(),
             token_meta: HashMap::new(),
             subscriptions: HashMap::new(),
@@ -44,13 +48,25 @@ impl UringReactor {
         self.recvmsg_multi_supported
     }
 
+    pub fn supports_fixed_buffers(&self) -> bool {
+        self.fixed_buffers_supported
+    }
+
+    /// High bit namespaces internally-minted tokens away from caller-supplied
+    /// `OpToken`s (InflightTable tokens are `generation << 32 | index` and
+    /// only reach the high bit after 2^31 slot generations).
+    pub(super) const INTERNAL_TOKEN_BIT: u64 = 1 << 63;
+
     pub(super) fn alloc_raw_token(&mut self) -> u64 {
         let out = self.next_token;
         self.next_token = self.next_token.wrapping_add(1).max(1);
-        out
+        out | Self::INTERNAL_TOKEN_BIT
     }
 
     pub(super) fn queue_entry(&mut self, entry: squeue::Entry) -> std::io::Result<()> {
+        // Bounded: a full SQ that submit() cannot drain (CQ overflow
+        // backpressure) must surface as an error, not a busy-loop.
+        let mut stalled_submits = 0usize;
         loop {
             // SAFETY: io_uring's SubmissionQueue::push is safe when entry is a valid
             // squeue::Entry. The push either succeeds (entry is copied into the SQ ring)
@@ -59,7 +75,18 @@ impl UringReactor {
             if pushed {
                 return Ok(());
             }
-            let _ = self.ring.submit()?;
+            let submitted = self.ring.submit()?;
+            if submitted == 0 {
+                stalled_submits += 1;
+                if stalled_submits >= 64 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::WouldBlock,
+                        "submission queue full and submit() makes no progress",
+                    ));
+                }
+            } else {
+                stalled_submits = 0;
+            }
         }
     }
 
@@ -179,6 +206,7 @@ impl UringReactor {
             flags,
             next_slot: 0,
             filled: 0,
+            replenish_buffers: false,
             mode,
         })
     }
@@ -232,7 +260,8 @@ impl UringReactor {
                     nbufs,
                     msg_template,
                 } => {
-                    if state.next_slot == 0 {
+                    if state.next_slot == 0 || state.replenish_buffers {
+                        state.replenish_buffers = false;
                         entries.push(
                             opcode::ProvideBuffers::new(
                                 provided.as_mut_ptr(),
@@ -266,9 +295,21 @@ impl UringReactor {
 
     pub(super) fn cleanup_udp_batch(&mut self, mut state: UdpBatchState) -> std::io::Result<()> {
         if let UdpBatchMode::Multi { bgid, nbufs, .. } = &mut state.mode {
+            // The kernel buffer ring still references `state.mode.provided`;
+            // park the state under a retire token until the RemoveBuffers
+            // completion confirms the kernel no longer owns the memory.
+            let retire_raw = self.alloc_raw_token();
             let remove = opcode::RemoveBuffers::new(*nbufs, *bgid)
                 .build()
-                .user_data(0);
+                .user_data(retire_raw);
+            self.token_meta.insert(
+                retire_raw,
+                TokenMeta {
+                    kind: TokenKind::RetiredBuffers,
+                    udp_batch: Some(state),
+                    _connect_addr: None,
+                },
+            );
             let _ = self.queue_entry(remove);
         }
         Ok(())
@@ -286,6 +327,12 @@ impl UringReactor {
             ));
         }
         let raw = token.0;
+        if self.token_meta.contains_key(&raw) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "reactor driver token already in flight",
+            ));
+        }
         let (entry, meta) = match op {
             NetOp::Connect { fd, addr } => {
                 let meta = TokenMeta {

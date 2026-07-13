@@ -12,6 +12,9 @@ pub(super) struct UdpBatchState {
     pub(super) flags: i32,
     pub(super) next_slot: usize,
     pub(super) filled: usize,
+    /// Set after ENOBUFS so the next Multi re-arm re-issues ProvideBuffers
+    /// even mid-batch (the kernel buffer ring is exhausted).
+    pub(super) replenish_buffers: bool,
     pub(super) mode: UdpBatchMode,
 }
 

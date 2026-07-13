@@ -130,8 +130,9 @@ where
         wake: WakeHandle,
     ) -> Result<SubmissionHandle<D::Token>, D::Error> {
         let handle = self.submit_with_generated_token(op, wake)?;
-        let submitted = self.runtime.flush()?;
-        assert!(submitted > 0, "submit_and_flush returned 0 for active op");
+        // A driver may legally flush eagerly inside submit() and report 0
+        // here; the op is queued and the handle valid either way.
+        let _ = self.runtime.flush()?;
         Ok(handle)
     }
 
@@ -265,7 +266,7 @@ where
         if !wait {
             return self.poll_now(max_events);
         }
-        let out = self.drain_completion_batch_or_wait(max_events, 1)?;
+        let out = self.drain_completion_batch_or_wait(max_events, 1, None)?;
         if out.is_empty() {
             return Ok(Vec::new());
         }
@@ -279,8 +280,19 @@ where
         min_events: usize,
         task_budget: usize,
     ) -> Result<(Vec<ReactorCompletion>, usize), <D as ReactorDriver>::Error> {
+        self.tick_completions_or_wait_deadline(max_events, min_events, task_budget, None)
+    }
+
+    #[inline(always)]
+    pub fn tick_completions_or_wait_deadline(
+        &mut self,
+        max_events: usize,
+        min_events: usize,
+        task_budget: usize,
+        timeout_ns: Option<u64>,
+    ) -> Result<(Vec<ReactorCompletion>, usize), <D as ReactorDriver>::Error> {
         self.runtime.flush()?;
-        let completions = self.drain_completion_batch_or_wait(max_events, min_events)?;
+        let completions = self.drain_completion_batch_or_wait(max_events, min_events, timeout_ns)?;
         let tasks = self.tasks.run_budget(task_budget);
         Ok((completions, tasks))
     }
@@ -290,9 +302,10 @@ where
         &mut self,
         max_events: usize,
         min_events: usize,
+        timeout_ns: Option<u64>,
     ) -> Result<Vec<ReactorCompletion>, <D as ReactorDriver>::Error> {
         self.runtime
-            .drain_completion_batch_or_wait(&mut self.inflight, max_events, min_events)
+            .drain_completion_batch_or_wait(&mut self.inflight, max_events, min_events, timeout_ns)
     }
 }
 
@@ -312,10 +325,25 @@ where
     where
         F: FnMut(D::Event),
     {
+        self.tick_or_wait_deadline(max_events, min_events, task_budget, None, on_event)
+    }
+
+    #[inline(always)]
+    pub fn tick_or_wait_deadline<F>(
+        &mut self,
+        max_events: usize,
+        min_events: usize,
+        task_budget: usize,
+        timeout_ns: Option<u64>,
+        on_event: F,
+    ) -> Result<(usize, usize), <D as ReactorDriver>::Error>
+    where
+        F: FnMut(D::Event),
+    {
         self.runtime.flush()?;
-        let events = self
-            .runtime
-            .drain_or_wait(max_events, min_events, on_event)?;
+        let events =
+            self.runtime
+                .drain_or_wait_deadline(max_events, min_events, timeout_ns, on_event)?;
         let tasks = self.tasks.run_budget(task_budget);
         Ok((events, tasks))
     }

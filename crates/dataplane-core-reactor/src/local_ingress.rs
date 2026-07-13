@@ -85,16 +85,32 @@ impl<T> LocalIngress<T> {
         Self { slots, ready, free }
     }
 
+    /// Blocks until a free slot is available. Spin-yields briefly, then
+    /// backs off to short sleeps so a full ring does not burn a core.
+    ///
+    /// Blocking is intentional and unbounded — these publishers are the
+    /// throughput API for producers that must not drop. Use the
+    /// `try_publish_*` variants when the caller needs bounded admission.
+    fn acquire_free_slot_blocking(&self) -> usize {
+        let mut spins = 0u32;
+        loop {
+            if let Some(idx) = self.try_acquire_free_slot() {
+                return idx;
+            }
+            spins = spins.saturating_add(1);
+            if spins < 64 {
+                std::thread::yield_now();
+            } else {
+                std::thread::sleep(std::time::Duration::from_micros(10));
+            }
+        }
+    }
+
     pub fn publish_from_staging(&self, staging: &mut Vec<T>) -> usize {
         if staging.is_empty() {
             return 0;
         }
-        let idx = loop {
-            if let Some(idx) = self.try_acquire_free_slot() {
-                break idx;
-            }
-            std::thread::yield_now();
-        };
+        let idx = self.acquire_free_slot_blocking();
         self.publish_vec_into_slot(idx, staging)
     }
 
@@ -102,22 +118,12 @@ impl<T> LocalIngress<T> {
         if staging.is_empty() {
             return 0;
         }
-        let idx = loop {
-            if let Some(idx) = self.try_acquire_free_slot() {
-                break idx;
-            }
-            std::thread::yield_now();
-        };
+        let idx = self.acquire_free_slot_blocking();
         self.publish_staging_into_slot(idx, staging)
     }
 
     pub fn publish_one(&self, item: T) -> usize {
-        let idx = loop {
-            if let Some(idx) = self.try_acquire_free_slot() {
-                break idx;
-            }
-            std::thread::yield_now();
-        };
+        let idx = self.acquire_free_slot_blocking();
         let mut slot = self.slots[idx]
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);

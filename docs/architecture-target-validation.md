@@ -90,6 +90,19 @@ feature combinations (no-default, scheduler backends, `erlang-nif`,
 
 ## Decision Log
 
+- **Deadline-bounded waits** — Accepted. `ReactorDriverWait::wait_deadline`
+  (default: fall back to unbounded `wait`) is implemented by the uring
+  (`submit_with_args` + timespec), syscall (epoll timeout), and unified
+  drivers; the balanced-profile adapter passes `WaitUntil` deadlines through
+  the host loop, so timer deadlines bound IO-idle blocking. Cross-thread
+  wakes are still only observed at wait exit — an eventfd wake path remains
+  future work for sub-deadline wake latency.
+- **Saturation degrades, never aborts** — Accepted. Child spawns at the task
+  cap defer to a bounded queue drained as slots free (drops counted beyond
+  2× cap) instead of panicking; the scheduler bus must be bounded
+  (debug-asserted) and full-bus deferrals are rejected back to the caller or
+  requeued locally, counted as `bus_rejected`.
+
 - **Umbrella crate (`dataplane`)** — Accepted. A high-level `Runtime` builder
   wires the adaptive reactor into the profiled runtime so consumers never name
   `ReactorDriver`/store generics. Chosen over widening `dataplane-runtime`

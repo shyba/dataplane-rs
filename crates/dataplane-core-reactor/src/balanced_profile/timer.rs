@@ -6,6 +6,10 @@ use alloc::vec::Vec;
 pub struct BalancedTimerOwnerConfig {
     pub initial_capacity: usize,
     pub wake_batch: usize,
+    /// Hard cap on armed timers. `None` (the default) keeps the host-profile
+    /// stores elastic; the embedded store is always bounded by its initial
+    /// capacity regardless of this field.
+    pub max_entries: Option<usize>,
 }
 
 impl Default for BalancedTimerOwnerConfig {
@@ -13,6 +17,7 @@ impl Default for BalancedTimerOwnerConfig {
         Self {
             initial_capacity: 256,
             wake_batch: 64,
+            max_entries: None,
         }
     }
 }
@@ -33,6 +38,7 @@ struct BalancedTimerEntry {
 pub struct BalancedTimerOwner {
     entries: Vec<BalancedTimerEntry>,
     wake_batch: usize,
+    max_entries: Option<usize>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -45,10 +51,15 @@ pub struct EmbeddedTimerStore {
 pub struct PerformanceTimerStore {
     entries: Vec<BalancedTimerEntry>,
     wake_batch: usize,
+    max_entries: Option<usize>,
 }
 
 pub trait TimerStoreOps {
     fn next_deadline(&self) -> Option<u64>;
+    /// Arms a timer. Bounded stores (embedded always; host-profile stores
+    /// when configured with `max_entries`) return
+    /// [`EmbeddedResourceError::TimerCapacityExceeded`] at capacity;
+    /// unconfigured host-profile stores are elastic and never fail.
     fn arm(
         &mut self,
         deadline_ns: u64,
@@ -138,26 +149,11 @@ impl TimerStoreOps for EmbeddedTimerStore {
     }
 
     #[inline]
-    fn drain_expired<F>(&mut self, now_ns: u64, mut on_wake: F) -> usize
+    fn drain_expired<F>(&mut self, now_ns: u64, on_wake: F) -> usize
     where
         F: FnMut(BalancedTimerWake),
     {
-        let mut drained = 0usize;
-        while drained < self.wake_batch {
-            let Some(entry) = self.entries.first().copied() else {
-                break;
-            };
-            if entry.deadline_ns > now_ns {
-                break;
-            }
-            let entry = self.entries.remove(0);
-            on_wake(BalancedTimerWake {
-                deadline_ns: entry.deadline_ns,
-                lease: entry.lease,
-            });
-            drained += 1;
-        }
-        drained
+        drain_expired_sorted(&mut self.entries, now_ns, self.wake_batch, on_wake)
     }
 }
 
@@ -167,6 +163,7 @@ impl PerformanceTimerStore {
         Self {
             entries: Vec::with_capacity(config.initial_capacity),
             wake_batch: config.wake_batch.max(1),
+            max_entries: config.max_entries,
         }
     }
 
@@ -203,6 +200,11 @@ impl TimerStoreOps for PerformanceTimerStore {
         deadline_ns: u64,
         lease: BalancedParkLease,
     ) -> Result<(), EmbeddedResourceError> {
+        if let Some(max) = self.max_entries {
+            if self.entries.len() >= max {
+                return Err(EmbeddedResourceError::TimerCapacityExceeded);
+            }
+        }
         let entry = BalancedTimerEntry { deadline_ns, lease };
         let idx = self
             .entries
@@ -222,26 +224,11 @@ impl TimerStoreOps for PerformanceTimerStore {
     }
 
     #[inline]
-    fn drain_expired<F>(&mut self, now_ns: u64, mut on_wake: F) -> usize
+    fn drain_expired<F>(&mut self, now_ns: u64, on_wake: F) -> usize
     where
         F: FnMut(BalancedTimerWake),
     {
-        let mut drained = 0usize;
-        while drained < self.wake_batch {
-            let Some(entry) = self.entries.first().copied() else {
-                break;
-            };
-            if entry.deadline_ns > now_ns {
-                break;
-            }
-            let entry = self.entries.remove(0);
-            on_wake(BalancedTimerWake {
-                deadline_ns: entry.deadline_ns,
-                lease: entry.lease,
-            });
-            drained += 1;
-        }
-        drained
+        drain_expired_sorted(&mut self.entries, now_ns, self.wake_batch, on_wake)
     }
 }
 
@@ -251,6 +238,7 @@ impl BalancedTimerOwner {
         Self {
             entries: Vec::with_capacity(config.initial_capacity),
             wake_batch: config.wake_batch.max(1),
+            max_entries: config.max_entries,
         }
     }
 
@@ -289,26 +277,11 @@ impl BalancedTimerOwner {
     }
 
     #[inline]
-    pub fn drain_expired<F>(&mut self, now_ns: u64, mut on_wake: F) -> usize
+    pub fn drain_expired<F>(&mut self, now_ns: u64, on_wake: F) -> usize
     where
         F: FnMut(BalancedTimerWake),
     {
-        let mut drained = 0usize;
-        while drained < self.wake_batch {
-            let Some(entry) = self.entries.first().copied() else {
-                break;
-            };
-            if entry.deadline_ns > now_ns {
-                break;
-            }
-            let entry = self.entries.remove(0);
-            on_wake(BalancedTimerWake {
-                deadline_ns: entry.deadline_ns,
-                lease: entry.lease,
-            });
-            drained += 1;
-        }
-        drained
+        drain_expired_sorted(&mut self.entries, now_ns, self.wake_batch, on_wake)
     }
 }
 
@@ -324,6 +297,11 @@ impl TimerStoreOps for BalancedTimerOwner {
         deadline_ns: u64,
         lease: BalancedParkLease,
     ) -> Result<(), EmbeddedResourceError> {
+        if let Some(max) = self.max_entries {
+            if self.entries.len() >= max {
+                return Err(EmbeddedResourceError::TimerCapacityExceeded);
+            }
+        }
         self.arm(deadline_ns, lease);
         Ok(())
     }
@@ -340,4 +318,27 @@ impl TimerStoreOps for BalancedTimerOwner {
     {
         self.drain_expired(now_ns, on_wake)
     }
+}
+
+/// Entries are kept sorted by deadline, so the expired prefix is a single
+/// contiguous range: one `partition_point` plus one `drain` instead of
+/// repeated `remove(0)` front-shifts.
+fn drain_expired_sorted<F>(
+    entries: &mut Vec<BalancedTimerEntry>,
+    now_ns: u64,
+    wake_batch: usize,
+    mut on_wake: F,
+) -> usize
+where
+    F: FnMut(BalancedTimerWake),
+{
+    let expired = entries.partition_point(|entry| entry.deadline_ns <= now_ns);
+    let count = expired.min(wake_batch);
+    for entry in entries.drain(..count) {
+        on_wake(BalancedTimerWake {
+            deadline_ns: entry.deadline_ns,
+            lease: entry.lease,
+        });
+    }
+    count
 }

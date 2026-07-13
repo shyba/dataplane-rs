@@ -42,7 +42,16 @@ impl Reactor for UringReactor {
 
     fn cancel(&mut self, token: SubscriptionToken) -> Result<(), Self::Error> {
         self.subscriptions.remove(&token);
-        self.token_meta.remove(&token.0);
+        if let Some(meta) = self.token_meta.get_mut(&token.0) {
+            // The kernel-side multishot op is still armed: ask the kernel to
+            // cancel it and keep the token mapped so late completions (which
+            // may carry accepted fds) are closed instead of leaked. The
+            // mapping is removed on the final no-MORE completion.
+            meta.kind = TokenKind::CancelledSubscription;
+            let entry = io_uring::opcode::AsyncCancel::new(token.0).build().user_data(0);
+            let _ = self.queue_entry(entry);
+            let _ = self.ring.submit();
+        }
         Ok(())
     }
 
@@ -72,6 +81,24 @@ impl Reactor for UringReactor {
                 continue;
             };
             match kind {
+                TokenKind::RetiredBuffers => {
+                    // Kernel confirmed RemoveBuffers: the provided backing
+                    // store can be freed now.
+                    self.token_meta.remove(&raw);
+                }
+                TokenKind::CancelledSubscription => {
+                    if result >= 0 {
+                        // Late accept completion after cancel: close the fd
+                        // instead of leaking it.
+                        // SAFETY: result >= 0 from an accept CQE is a freshly
+                        // accepted fd owned by no one else; closing it here is
+                        // the only cleanup path.
+                        let _ = unsafe { libc::close(result) };
+                    }
+                    if !cqe_more(flags) {
+                        self.token_meta.remove(&raw);
+                    }
+                }
                 TokenKind::Op(op_state) => match op_state {
                     OpState::Simple(kind) => {
                         self.token_meta.remove(&raw);
@@ -135,6 +162,15 @@ impl Reactor for UringReactor {
                                     .and_then(|m| m.udp_batch.as_ref())
                                     .map(|s| s.filled)
                                     .unwrap_or(0);
+                                if errno == libc::ENOBUFS {
+                                    if let Some(state) = self
+                                        .token_meta
+                                        .get_mut(&raw)
+                                        .and_then(|m| m.udp_batch.as_mut())
+                                    {
+                                        state.replenish_buffers = true;
+                                    }
+                                }
                                 if filled > 0 {
                                     if let Some(meta) = self.token_meta.remove(&raw) {
                                         if let Some(state) = meta.udp_batch {
@@ -326,8 +362,9 @@ impl ReactorDriver for UringReactor {
             backend: DriverBackendKind::IoUring,
             supports_accept_multi: true,
             supports_multishot: self.supports_recvmsg_multishot(),
-            supports_fixed_buffers: true,
-            supports_sqpoll: true,
+            supports_fixed_buffers: self.supports_fixed_buffers(),
+            // The ring is not built with SQPOLL; do not advertise it.
+            supports_sqpoll: false,
         }
     }
 }
@@ -346,6 +383,35 @@ impl ReactorDriverWait for UringReactor {
         }
 
         let events = self.poll(true)?;
+        let count = events.len();
+        self.ready_events.extend(events);
+        Ok(count)
+    }
+
+    fn wait_deadline(
+        &mut self,
+        min_events: usize,
+        timeout_ns: Option<u64>,
+    ) -> Result<usize, Self::Error> {
+        let Some(timeout_ns) = timeout_ns else {
+            return self.wait(min_events);
+        };
+        if !self.ready_events.is_empty() {
+            return Ok(self.ready_events.len());
+        }
+
+        let timespec = io_uring::types::Timespec::new()
+            .sec(timeout_ns / 1_000_000_000)
+            .nsec((timeout_ns % 1_000_000_000) as u32);
+        let args = io_uring::types::SubmitArgs::new().timespec(&timespec);
+        match self.ring.submitter().submit_with_args(1, &args) {
+            Ok(_) => {}
+            Err(err)
+                if err.raw_os_error() == Some(libc::ETIME)
+                    || err.raw_os_error() == Some(libc::EINTR) => {}
+            Err(err) => return Err(err),
+        }
+        let events = self.poll(false)?;
         let count = events.len();
         self.ready_events.extend(events);
         Ok(count)

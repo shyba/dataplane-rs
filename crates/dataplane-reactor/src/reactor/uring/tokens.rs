@@ -18,6 +18,12 @@ pub(super) enum OpState {
 pub(super) enum TokenKind {
     Op(OpState),
     Subscription(SubscriptionToken),
+    /// A cancelled multishot subscription whose kernel op may still emit
+    /// CQEs; accepted fds are closed until the final (no-MORE) CQE arrives.
+    CancelledSubscription,
+    /// A queued RemoveBuffers op whose meta keeps the provided buffer
+    /// backing store alive until the kernel confirms removal.
+    RetiredBuffers,
 }
 
 pub(super) struct TokenMeta {

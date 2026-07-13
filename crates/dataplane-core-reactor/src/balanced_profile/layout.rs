@@ -162,6 +162,7 @@ impl BalancedProfileLayout {
         BalancedTimerOwnerConfig {
             initial_capacity: self.budgets.completion_budget.max(64),
             wake_batch: self.budgets.completion_budget.max(1),
+            max_entries: None,
         }
     }
 
@@ -288,6 +289,7 @@ impl EmbeddedProfileLayout {
         BalancedTimerOwnerConfig {
             initial_capacity: self.budgets().completion_budget.max(32),
             wake_batch: self.budgets().completion_budget.clamp(1, 16),
+            max_entries: None,
         }
     }
 
@@ -443,6 +445,7 @@ impl PerformanceProfileLayout {
         BalancedTimerOwnerConfig {
             initial_capacity: self.budgets().completion_budget.max(512),
             wake_batch: self.budgets().completion_budget.max(128),
+            max_entries: None,
         }
     }
 

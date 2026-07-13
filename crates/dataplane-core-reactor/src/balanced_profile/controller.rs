@@ -30,6 +30,9 @@ pub struct BalancedController<TimerStore = BalancedTimerOwner, ParkStore = Balan
     timer_store: TimerStore,
     park_store: ParkStore,
     phase: BalancedControllerPhase,
+    last_now_ns: u64,
+    stale_timer_wakes: u64,
+    now_regressions: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,6 +52,9 @@ where
             timer_store,
             park_store,
             phase: BalancedControllerPhase::Idle,
+            last_now_ns: 0,
+            stale_timer_wakes: 0,
+            now_regressions: 0,
         }
     }
 
@@ -82,6 +88,19 @@ where
         self.timer_store.next_deadline()
     }
 
+    /// Timer expiries whose park slot was already gone (stale/cancelled lease).
+    #[inline]
+    pub fn stale_timer_wakes(&self) -> u64 {
+        self.stale_timer_wakes
+    }
+
+    /// Times `step` observed `now_ns` going backwards. Timers stall silently
+    /// under a regressing clock; this counter makes that visible.
+    #[inline]
+    pub fn now_regressions(&self) -> u64 {
+        self.now_regressions
+    }
+
     #[inline]
     pub fn step(
         &mut self,
@@ -89,6 +108,16 @@ where
         has_runtime_work: bool,
         has_task_work: bool,
     ) -> BalancedControllerStep {
+        if now_ns < self.last_now_ns {
+            self.now_regressions = self.now_regressions.saturating_add(1);
+            crate::scheduler_trace!(
+                "balanced controller observed non-monotonic now_ns: {} < {}",
+                now_ns,
+                self.last_now_ns
+            );
+        } else {
+            self.last_now_ns = now_ns;
+        }
         self.phase = if has_runtime_work {
             BalancedControllerPhase::DrainCompletions
         } else if self
@@ -104,8 +133,12 @@ where
         };
 
         let expired_timers = if self.phase == BalancedControllerPhase::ProcessTimers {
+            let park_store = &mut self.park_store;
+            let stale = &mut self.stale_timer_wakes;
             self.timer_store.drain_expired(now_ns, |wake| {
-                let _ = self.park_store.wake(wake.lease);
+                if !park_store.wake(wake.lease) {
+                    *stale = stale.saturating_add(1);
+                }
             })
         } else {
             0

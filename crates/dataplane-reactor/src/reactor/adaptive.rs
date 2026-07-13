@@ -80,6 +80,16 @@ impl ReactorDriverWait for UnifiedReactor {
             Self::Syscall(r) => ReactorDriverWait::wait(r, min_events),
         }
     }
+    fn wait_deadline(
+        &mut self,
+        min_events: usize,
+        timeout_ns: Option<u64>,
+    ) -> Result<usize, Self::Error> {
+        match self {
+            Self::IoUring(r) => r.wait_deadline(min_events, timeout_ns),
+            Self::Syscall(r) => r.wait_deadline(min_events, timeout_ns),
+        }
+    }
 }
 
 impl UnifiedReactor {
@@ -115,22 +125,7 @@ impl UnifiedReactor {
     }
 
     pub fn capabilities(&self) -> ReactorCapabilities {
-        match self {
-            Self::IoUring(r) => ReactorCapabilities {
-                backend: ReactorBackendKind::IoUring,
-                supports_accept_multi: true,
-                supports_multishot: r.supports_recvmsg_multishot(),
-                supports_fixed_buffers: true,
-                supports_sqpoll: true,
-            },
-            Self::Syscall(_) => ReactorCapabilities {
-                backend: ReactorBackendKind::Syscall,
-                supports_accept_multi: true,
-                supports_multishot: false,
-                supports_fixed_buffers: false,
-                supports_sqpoll: false,
-            },
-        }
+        ReactorDriver::capabilities(self)
     }
 }
 
