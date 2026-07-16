@@ -1,3 +1,6 @@
+//! Host-side twin of the `noalloc_primitives` replay types. Kept separate
+//! because the no_std/no-alloc targets cannot depend on this crate; keep the
+//! two definitions field- and derive-aligned when changing either.
 #[derive(Debug, Clone)]
 pub enum TraceEvent {
     RecvReq {
@@ -27,14 +30,14 @@ pub enum TraceEvent {
     Other,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplayKind {
     Recv { len: usize },
     Send { bytes: usize },
     Accept { timeout_ms: i64 },
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ScheduledOp {
     pub slot: usize,
     pub kind: ReplayKind,

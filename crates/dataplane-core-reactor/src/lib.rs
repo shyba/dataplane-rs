@@ -21,6 +21,8 @@ pub mod native_future_task;
 pub mod native_task;
 #[cfg(feature = "host-core")]
 mod shared_wake;
+#[cfg(feature = "host-core")]
+pub use shared_wake::SharedTaskWakeHandle;
 
 #[cfg(feature = "host-core")]
 pub mod host_loop;

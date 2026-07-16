@@ -71,6 +71,10 @@ where
     }
 
     #[inline]
+    pub fn host(&self) -> &HostLoop<D, T> {
+        &self.host
+    }
+
     pub fn host_mut(&mut self) -> &mut HostLoop<D, T> {
         &mut self.host
     }

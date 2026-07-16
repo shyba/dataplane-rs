@@ -6,7 +6,6 @@ use crate::reactor_runtime::ReactorRuntime;
 use crate::submission_handle::SubmissionHandle;
 use crate::wake_handle::WakeHandle;
 
-use super::completion::CompletionDrain;
 use super::SubmissionFacade;
 
 pub struct HostLoop<D, T>
@@ -100,6 +99,19 @@ where
     }
 
     #[inline(always)]
+    /// True when at least one task is queued to run now. Distinct from
+    /// [`HostLoop::has_task_work`], which counts *alive* (possibly parked)
+    /// tasks: controllers must use the ready signal to decide whether
+    /// running tasks can make progress.
+    pub fn has_ready_task_work(&self) -> bool {
+        self.tasks.ready_len() > 0
+    }
+
+    /// Number of alive tasks (running, ready, or parked).
+    pub fn active_tasks(&self) -> usize {
+        self.tasks.active_tasks()
+    }
+
     pub fn has_task_work(&self) -> bool {
         self.tasks.active_tasks() != 0
     }
@@ -297,6 +309,9 @@ where
         Ok((completions, tasks))
     }
 
+    /// Drains completions, removing their inflight entries and requeueing
+    /// any task registered via `WakeHandle::LocalTask` so parked tasks make
+    /// progress in the same tick their I/O completes.
     #[inline(always)]
     fn drain_completion_batch_or_wait(
         &mut self,
@@ -304,8 +319,20 @@ where
         min_events: usize,
         timeout_ns: Option<u64>,
     ) -> Result<Vec<ReactorCompletion>, <D as ReactorDriver>::Error> {
-        self.runtime
-            .drain_completion_batch_or_wait(&mut self.inflight, max_events, min_events, timeout_ns)
+        let mut completions = Vec::new();
+        let Self {
+            runtime,
+            tasks,
+            inflight,
+        } = self;
+        runtime.drain_or_wait_deadline(max_events, min_events, timeout_ns, |event| {
+            let completion = ReactorCompletion::from(event);
+            if let Some(WakeHandle::LocalTask(task)) = inflight.remove(completion.token) {
+                let _ = tasks.wake(task);
+            }
+            completions.push(completion);
+        })?;
+        Ok(completions)
     }
 }
 

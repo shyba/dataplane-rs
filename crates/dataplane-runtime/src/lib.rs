@@ -26,6 +26,8 @@ pub mod esp32;
 #[cfg(feature = "host-runtime")]
 pub mod runtime_profiles;
 #[cfg(feature = "host-runtime")]
+pub mod net_addr;
+#[cfg(feature = "host-runtime")]
 pub mod runtime_protocol;
 #[cfg(feature = "host-runtime")]
 pub mod runtime_scheduler;

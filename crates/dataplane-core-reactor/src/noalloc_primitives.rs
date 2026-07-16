@@ -340,7 +340,9 @@ impl<T: Copy + Default, const SLOTS: usize, const CAP: usize> FixedLocalExec<T, 
         queue.push(item).map_err(PushError::Full)?;
         self.pending += 1;
         if was_empty && !self.enqueued[slot] {
-            self.enqueued[slot] = self.runnable.push(slot);
+            let pushed = self.runnable.push(slot);
+            debug_assert!(pushed, "runnable ring full despite enqueued dedupe");
+            self.enqueued[slot] = pushed;
         }
         Ok(())
     }
@@ -383,7 +385,9 @@ impl<T: Copy + Default, const SLOTS: usize, const CAP: usize> FixedLocalExec<T, 
             }
 
             if !self.queues[slot].is_empty() && !self.enqueued[slot] {
-                self.enqueued[slot] = self.runnable.push(slot);
+                let pushed = self.runnable.push(slot);
+            debug_assert!(pushed, "runnable ring full despite enqueued dedupe");
+            self.enqueued[slot] = pushed;
             }
             runnable += 1;
         }
@@ -445,7 +449,9 @@ impl<const SLOTS: usize, const MAX_PER_SLOT: usize> FixedLocalExecCounts<SLOTS, 
         *current = next;
         self.pending = total;
         if was_empty && !self.enqueued[slot] {
-            self.enqueued[slot] = self.runnable.push(slot);
+            let pushed = self.runnable.push(slot);
+            debug_assert!(pushed, "runnable ring full despite enqueued dedupe");
+            self.enqueued[slot] = pushed;
         }
         Ok(())
     }
@@ -489,7 +495,9 @@ impl<const SLOTS: usize, const MAX_PER_SLOT: usize> FixedLocalExecCounts<SLOTS, 
             }
 
             if self.pending_per_slot[slot] != 0 && !self.enqueued[slot] {
-                self.enqueued[slot] = self.runnable.push(slot);
+                let pushed = self.runnable.push(slot);
+            debug_assert!(pushed, "runnable ring full despite enqueued dedupe");
+            self.enqueued[slot] = pushed;
             }
             runnable += 1;
         }

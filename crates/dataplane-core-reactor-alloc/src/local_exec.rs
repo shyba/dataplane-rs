@@ -2,6 +2,14 @@ use alloc::collections::VecDeque;
 use alloc::vec;
 use alloc::vec::Vec;
 
+/// Error returned by fallible pushes, mirroring the no_std
+/// `FixedLocalExec` contract (the item is handed back).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PushError<K> {
+    /// `slot` is outside the configured slot count.
+    BadSlot(K),
+}
+
 pub struct LocalExec<K> {
     queues: Vec<VecDeque<K>>,
     runnable: VecDeque<usize>,
@@ -19,8 +27,10 @@ impl<K> LocalExec<K> {
         }
     }
 
-    pub fn push(&mut self, slot: usize, item: K) {
-        let queue = &mut self.queues[slot];
+    pub fn push(&mut self, slot: usize, item: K) -> Result<(), PushError<K>> {
+        let Some(queue) = self.queues.get_mut(slot) else {
+            return Err(PushError::BadSlot(item));
+        };
         let was_empty = queue.is_empty();
         queue.push_back(item);
         self.pending += 1;
@@ -28,6 +38,7 @@ impl<K> LocalExec<K> {
             self.enqueued[slot] = true;
             self.runnable.push_back(slot);
         }
+        Ok(())
     }
 
     pub fn has_work(&self) -> bool {
@@ -120,7 +131,7 @@ mod tests {
 
             for op in ops {
                 match op {
-                    Op::Push { slot, value } => exec.push(slot % slot_count, value),
+                    Op::Push { slot, value } => exec.push(slot % slot_count, value).expect("valid slot"),
                     Op::Drain { runnable_budget, session_run_budget, drain_session } => {
                         let before_pending = exec.pending();
                         let mut drained = Vec::new();
@@ -147,10 +158,10 @@ mod tests {
     #[test]
     fn pending_tracks_total_work_and_fifo_order() {
         let mut exec = LocalExec::new(2);
-        exec.push(0, 10);
-        exec.push(0, 11);
-        exec.push(1, 20);
-        exec.push(0, 12);
+        exec.push(0, 10).expect("push");
+        exec.push(0, 11).expect("push");
+        exec.push(1, 20).expect("push");
+        exec.push(0, 12).expect("push");
 
         let mut drained = Vec::new();
         let progressed = exec.drain(usize::MAX, 1, false, |value| drained.push(value));
@@ -165,9 +176,9 @@ mod tests {
     fn slot_is_enqueued_only_once_while_non_empty() {
         let mut exec = LocalExec::new(2);
 
-        exec.push(1, 10);
-        exec.push(1, 11);
-        exec.push(1, 12);
+        exec.push(1, 10).expect("push");
+        exec.push(1, 11).expect("push");
+        exec.push(1, 12).expect("push");
 
         assert_eq!(exec.pending(), 3);
         assert_eq!(exec.runnable.iter().copied().collect::<Vec<_>>(), vec![1]);
@@ -177,9 +188,9 @@ mod tests {
     #[test]
     fn partial_drain_requeues_slot_exactly_once() {
         let mut exec = LocalExec::new(1);
-        exec.push(0, 10);
-        exec.push(0, 11);
-        exec.push(0, 12);
+        exec.push(0, 10).expect("push");
+        exec.push(0, 11).expect("push");
+        exec.push(0, 12).expect("push");
 
         let mut drained = Vec::new();
         let progressed = exec.drain(1, 1, false, |value| drained.push(value));
@@ -194,11 +205,11 @@ mod tests {
     #[test]
     fn drain_session_true_drains_current_slot_fully() {
         let mut exec = LocalExec::new(2);
-        exec.push(0, 10);
-        exec.push(0, 11);
-        exec.push(0, 12);
-        exec.push(1, 20);
-        exec.push(1, 21);
+        exec.push(0, 10).expect("push");
+        exec.push(0, 11).expect("push");
+        exec.push(0, 12).expect("push");
+        exec.push(1, 20).expect("push");
+        exec.push(1, 21).expect("push");
 
         let mut drained = Vec::new();
         let progressed = exec.drain(1, 1, true, |value| drained.push(value));
@@ -213,11 +224,11 @@ mod tests {
     #[test]
     fn drain_session_false_respects_session_budget() {
         let mut exec = LocalExec::new(2);
-        exec.push(0, 10);
-        exec.push(0, 11);
-        exec.push(0, 12);
-        exec.push(1, 20);
-        exec.push(1, 21);
+        exec.push(0, 10).expect("push");
+        exec.push(0, 11).expect("push");
+        exec.push(0, 12).expect("push");
+        exec.push(1, 20).expect("push");
+        exec.push(1, 21).expect("push");
 
         let mut drained = Vec::new();
         let progressed = exec.drain(1, 1, false, |value| drained.push(value));
@@ -235,8 +246,8 @@ mod tests {
     #[test]
     fn zero_runnable_budget_preserves_state() {
         let mut exec = LocalExec::new(1);
-        exec.push(0, 10);
-        exec.push(0, 11);
+        exec.push(0, 10).expect("push");
+        exec.push(0, 11).expect("push");
 
         let mut drained = Vec::new();
         let progressed = exec.drain(0, 0, false, |value| drained.push(value));
@@ -251,8 +262,8 @@ mod tests {
     #[test]
     fn zero_session_budget_requeues_without_progress() {
         let mut exec = LocalExec::new(1);
-        exec.push(0, 10);
-        exec.push(0, 11);
+        exec.push(0, 10).expect("push");
+        exec.push(0, 11).expect("push");
 
         let mut drained = Vec::new();
         let progressed = exec.drain(1, 0, false, |value| drained.push(value));

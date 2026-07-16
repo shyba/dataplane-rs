@@ -542,6 +542,21 @@ where
     }
 
     #[inline(always)]
+    /// Requeues a parked task for execution. Returns false when the ref is
+    /// stale (slot dead or generation mismatch) or the task is already queued.
+    pub fn wake(&mut self, task: TaskRef) -> bool {
+        let idx = task.index();
+        let Some(slot) = self.slots.get_mut(idx) else {
+            return false;
+        };
+        if !slot.is_live() || slot.generation != task.generation() || slot.queued {
+            return false;
+        }
+        slot.mark_queued();
+        self.ready.push_back(idx as u32);
+        true
+    }
+
     pub fn ready_len(&self) -> usize {
         self.ready.len()
     }

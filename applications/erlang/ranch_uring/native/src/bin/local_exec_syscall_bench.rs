@@ -75,7 +75,7 @@ fn run_shard(
                 slot,
                 kind: ReplayKind::Send { bytes: 64 },
             };
-            local_exec.push(op.slot, op.kind);
+            local_exec.push(op.slot, op.kind).expect("push");
         }
     }
 

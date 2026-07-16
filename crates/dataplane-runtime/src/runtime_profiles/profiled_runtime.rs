@@ -82,6 +82,16 @@ where
         }
     }
 
+    /// Number of alive tasks (running, ready, or parked).
+    #[inline]
+    pub fn active_tasks(&self) -> usize {
+        match self {
+            Self::Balanced(runtime) => runtime.host().active_tasks(),
+            Self::Embedded(runtime) => runtime.host().active_tasks(),
+            Self::Performance(runtime) => runtime.host().active_tasks(),
+        }
+    }
+
     #[inline]
     pub fn has_task_work(&self) -> bool {
         match self {
@@ -245,6 +255,29 @@ where
     T: NativeTask,
     P: BalancedHostPolicy,
 {
+    /// Non-blocking completions tick: drain ready completions (routing any
+    /// registered task wakes) and step ready tasks.
+    #[inline]
+    pub fn tick_completions(
+        &mut self,
+        max_events: usize,
+        task_budget: usize,
+    ) -> Result<
+        (
+            Vec<ReactorCompletion>,
+            usize,
+        ),
+        <D as ReactorDriver>::Error,
+    > {
+        match self {
+            Self::Balanced(runtime) => runtime.host_mut().tick_completions(max_events, task_budget),
+            Self::Embedded(runtime) => runtime.host_mut().tick_completions(max_events, task_budget),
+            Self::Performance(runtime) => {
+                runtime.host_mut().tick_completions(max_events, task_budget)
+            }
+        }
+    }
+
     #[inline]
     pub fn poll(
         &mut self,

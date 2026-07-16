@@ -2,6 +2,16 @@ use alloc::collections::VecDeque;
 use alloc::vec;
 use alloc::vec::Vec;
 
+/// Errors from fallible count pushes, mirroring the no_std
+/// `FixedLocalExecCounts` contract.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PushCountError {
+    /// `slot` is outside the configured slot count.
+    BadSlot,
+    /// The per-slot or total pending count would overflow.
+    Overflow,
+}
+
 pub struct LocalExecCounts {
     pending_per_slot: Vec<usize>,
     runnable: VecDeque<usize>,
@@ -19,17 +29,26 @@ impl LocalExecCounts {
         }
     }
 
-    pub fn push_count(&mut self, slot: usize, count: usize) {
+    pub fn push_count(&mut self, slot: usize, count: usize) -> Result<(), PushCountError> {
         if count == 0 {
-            return;
+            return Ok(());
         }
-        let was_empty = self.pending_per_slot[slot] == 0;
-        self.pending_per_slot[slot] += count;
-        self.pending += count;
+        let Some(per_slot) = self.pending_per_slot.get_mut(slot) else {
+            return Err(PushCountError::BadSlot);
+        };
+        let was_empty = *per_slot == 0;
+        *per_slot = per_slot
+            .checked_add(count)
+            .ok_or(PushCountError::Overflow)?;
+        self.pending = self
+            .pending
+            .checked_add(count)
+            .ok_or(PushCountError::Overflow)?;
         if was_empty && !self.enqueued[slot] {
             self.enqueued[slot] = true;
             self.runnable.push_back(slot);
         }
+        Ok(())
     }
 
     pub fn has_work(&self) -> bool {
@@ -118,7 +137,7 @@ mod tests {
 
             for op in ops {
                 match op {
-                    Op::Push { slot, count } => exec.push_count(slot % slot_count, count),
+                    Op::Push { slot, count } => exec.push_count(slot % slot_count, count).expect("push_count"),
                     Op::Drain { runnable_budget, session_run_budget, drain_session } => {
                         let before_pending = exec.pending;
                         let mut callback_count = 0usize;
@@ -145,8 +164,8 @@ mod tests {
     #[test]
     fn zero_count_is_a_noop() {
         let mut exec = LocalExecCounts::new(2);
-        exec.push_count(0, 0);
-        exec.push_count(1, 0);
+        exec.push_count(0, 0).expect("push_count");
+        exec.push_count(1, 0).expect("push_count");
 
         assert!(!exec.has_work());
         assert_eq!(exec.drain(4, 4, false, || panic!("should not run")), 0);
@@ -155,9 +174,9 @@ mod tests {
     #[test]
     fn pending_count_tracks_total_work_and_preserves_slot_fairness() {
         let mut exec = LocalExecCounts::new(2);
-        exec.push_count(0, 2);
-        exec.push_count(1, 1);
-        exec.push_count(0, 1);
+        exec.push_count(0, 2).expect("push_count");
+        exec.push_count(1, 1).expect("push_count");
+        exec.push_count(0, 1).expect("push_count");
 
         assert!(exec.has_work());
 
@@ -178,7 +197,7 @@ mod tests {
     fn push_count_zero_is_noop() {
         let mut exec = LocalExecCounts::new(3);
 
-        exec.push_count(1, 0);
+        exec.push_count(1, 0).expect("push_count");
 
         assert_eq!(exec.pending, 0);
         assert_eq!(exec.pending_per_slot, vec![0, 0, 0]);
@@ -190,8 +209,8 @@ mod tests {
     fn slot_is_enqueued_only_once_while_non_empty() {
         let mut exec = LocalExecCounts::new(2);
 
-        exec.push_count(1, 2);
-        exec.push_count(1, 3);
+        exec.push_count(1, 2).expect("push_count");
+        exec.push_count(1, 3).expect("push_count");
 
         assert_eq!(exec.pending, 5);
         assert_eq!(exec.pending_per_slot[1], 5);
@@ -202,7 +221,7 @@ mod tests {
     #[test]
     fn drain_session_consumes_entire_slot_when_requested() {
         let mut exec = LocalExecCounts::new(1);
-        exec.push_count(0, 3);
+        exec.push_count(0, 3).expect("push_count");
 
         let mut ran = 0usize;
         let progressed = exec.drain(1, 1, true, || ran += 1);
@@ -215,7 +234,7 @@ mod tests {
     #[test]
     fn partial_drain_requeues_remaining_work_once() {
         let mut exec = LocalExecCounts::new(1);
-        exec.push_count(0, 3);
+        exec.push_count(0, 3).expect("push_count");
 
         let mut ran = 0usize;
         let progressed = exec.drain(1, 2, false, || ran += 1);
@@ -233,7 +252,7 @@ mod tests {
     fn zero_runnable_budget_preserves_state() {
         let mut exec = LocalExecCounts::new(1);
         let mut calls = 0usize;
-        exec.push_count(0, 2);
+        exec.push_count(0, 2).expect("push_count");
 
         let progressed = exec.drain(0, 0, false, || calls += 1);
 
@@ -249,7 +268,7 @@ mod tests {
     fn zero_session_budget_requeues_without_progress() {
         let mut exec = LocalExecCounts::new(1);
         let mut calls = 0usize;
-        exec.push_count(0, 2);
+        exec.push_count(0, 2).expect("push_count");
 
         let progressed = exec.drain(1, 0, false, || calls += 1);
 

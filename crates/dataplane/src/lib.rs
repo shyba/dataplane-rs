@@ -32,7 +32,9 @@
 use std::io;
 use std::time::Instant;
 
+use dataplane_core_reactor::balanced_profile::BalancedHostAction;
 use dataplane_core_reactor::native_task::{NativeTask, NativeTaskCapacityError, TaskRef};
+use dataplane_core_reactor::wake_handle::WakeHandle;
 use dataplane_reactor::reactor::adaptive::UnifiedReactor;
 use dataplane_runtime::runtime_profiles::{build_profiled_runtime, ProfiledRuntime};
 
@@ -61,6 +63,12 @@ pub enum RuntimeError {
     Profile(dataplane_runtime::runtime_profiles::BalancedProfileError),
     /// Driving the runtime failed with a reactor-level I/O error.
     Io(io::Error),
+    /// Tasks are alive but none can ever run again: all remaining tasks are
+    /// parked with no outstanding I/O and no armed timer to wake them.
+    Stalled {
+        /// Alive-but-parked tasks at the moment the stall was detected.
+        parked_tasks: usize,
+    },
 }
 
 impl core::fmt::Display for RuntimeError {
@@ -69,6 +77,10 @@ impl core::fmt::Display for RuntimeError {
             Self::Reactor(err) => write!(f, "reactor backend setup failed: {err}"),
             Self::Profile(err) => write!(f, "profile layout failed: {err:?}"),
             Self::Io(err) => write!(f, "runtime I/O failed: {err}"),
+            Self::Stalled { parked_tasks } => write!(
+                f,
+                "runtime stalled: {parked_tasks} parked task(s) with no I/O or timer to wake them"
+            ),
         }
     }
 }
@@ -170,29 +182,60 @@ where
         self.inner.has_work()
     }
 
-    /// Run one scheduling tick: drive completions and step ready tasks.
-    ///
-    /// `max_events` bounds reactor completions drained this tick and
-    /// `task_budget` bounds task steps; both keep latency under caller
-    /// control. Events are handed to tasks via their wake tokens.
-    pub fn tick(&mut self, max_events: usize, task_budget: usize) -> Result<(), RuntimeError> {
-        let now_ns = self.now_ns();
+    /// Submit a reactor operation. When `wake` names a task, that task is
+    /// requeued (woken from [`task::StepResult::Parked`]) on the tick that
+    /// drains the operation's completion.
+    pub fn submit(
+        &mut self,
+        op: net::NetOp,
+        wake: Option<TaskRef>,
+    ) -> Result<net::OpToken, RuntimeError> {
+        let wake = match wake {
+            Some(task) => WakeHandle::LocalTask(task),
+            None => WakeHandle::None,
+        };
         self.inner
-            .tick(now_ns, max_events, task_budget, |_event| {})
-            .map(|_| ())
+            .submit_and_flush_token(op, wake)
+            .map_err(RuntimeError::Io)
+    }
+
+    /// Run one non-blocking scheduling tick: drain ready completions (waking
+    /// their registered tasks) and step ready tasks. Returns the number of
+    /// completions drained.
+    pub fn tick(&mut self, max_events: usize, task_budget: usize) -> Result<usize, RuntimeError> {
+        self.inner
+            .tick_completions(max_events, task_budget)
+            .map(|(completions, _tasks)| completions.len())
             .map_err(RuntimeError::Io)
     }
 
     /// Drive the runtime until no task or reactor work remains.
+    ///
+    /// Budgets come from the profile layout. Blocking waits are bounded by
+    /// armed timer deadlines. Returns [`RuntimeError::Stalled`] when the only
+    /// remaining tasks are parked with nothing (no in-flight I/O, no timer)
+    /// that could ever wake them.
     pub fn run(&mut self) -> Result<(), RuntimeError> {
-        const MAX_EVENTS: usize = 256;
         const MIN_EVENTS: usize = 1;
-        const TASK_BUDGET: usize = 256;
+        let budgets = self.inner.layout().budgets();
         while self.inner.has_work() {
             let now_ns = self.now_ns();
-            self.inner
-                .tick_or_wait(now_ns, MAX_EVENTS, MIN_EVENTS, TASK_BUDGET, |_event| {})
+            let tick = self
+                .inner
+                .tick_completions_or_wait(
+                    now_ns,
+                    budgets.completion_budget,
+                    MIN_EVENTS,
+                    budgets.task_budget,
+                )
                 .map_err(RuntimeError::Io)?;
+            if matches!(tick.controller_step.host_action, BalancedHostAction::Idle)
+                && self.inner.has_work()
+            {
+                return Err(RuntimeError::Stalled {
+                    parked_tasks: self.inner.active_tasks(),
+                });
+            }
         }
         Ok(())
     }

@@ -264,7 +264,10 @@ impl ShardRuntimeHandle {
         self.drain_runtime_queue_inner(|future| {
             let mut future = future;
             if matches!(poll_boxed_runtime_future_once(&mut future), Poll::Pending) {
-                engine.spawn(RuntimeFutureTask::parked(future));
+                // Dropping the future on saturation closes its result cell,
+                // so the remote receiver observes an error instead of the
+                // shard aborting on the panicking spawn.
+                let _ = engine.try_spawn(RuntimeFutureTask::parked(future));
             }
             drained += 1;
         });

@@ -812,7 +812,7 @@ fn worker_loop(
     let mut stats = ShardStats::default();
     if !initial_ops.is_empty() {
         for op in initial_ops {
-            local_exec.push(op.slot, op.kind);
+            local_exec.push(op.slot, op.kind).expect("push");
         }
     }
     if let Some(barrier) = start_barrier {
@@ -823,7 +823,7 @@ fn worker_loop(
             let batch_len = ingress.with_slot(idx, |batch| {
                 let batch_len = batch.len();
                 for op in batch.drain(..) {
-                    local_exec.push(op.slot, op.kind);
+                    local_exec.push(op.slot, op.kind).expect("push");
                 }
                 batch_len
             });
@@ -904,7 +904,7 @@ fn worker_loop_counts(
             stats.send_ops += op.send_ops;
             stats.send_bytes += op.send_bytes;
             stats.accept_ops += op.accept_ops;
-            local_exec.push_count(op.slot, op.count);
+            local_exec.push_count(op.slot, op.count).expect("push_count");
         }
     }
     if let Some(barrier) = start_barrier {
@@ -920,7 +920,7 @@ fn worker_loop_counts(
                     stats.send_ops += op.send_ops;
                     stats.send_bytes += op.send_bytes;
                     stats.accept_ops += op.accept_ops;
-                    local_exec.push_count(op.slot, op.count);
+                    local_exec.push_count(op.slot, op.count).expect("push_count");
                 }
                 batch_len
             });

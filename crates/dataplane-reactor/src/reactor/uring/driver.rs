@@ -41,7 +41,15 @@ impl Reactor for UringReactor {
     }
 
     fn cancel(&mut self, token: SubscriptionToken) -> Result<(), Self::Error> {
-        self.subscriptions.remove(&token);
+        let removed = self.subscriptions.remove(&token);
+        // Exhaustive on purpose: CancelledSubscription's completion handling
+        // assumes accept semantics (results are fds). A new subscription kind
+        // must get its own cancelled-token kind.
+        if let Some(state) = &removed {
+            match state.kind {
+                NetSubscription::AcceptMulti { .. } => {}
+            }
+        }
         if let Some(meta) = self.token_meta.get_mut(&token.0) {
             // The kernel-side multishot op is still armed: ask the kernel to
             // cancel it and keep the token mapped so late completions (which
@@ -82,11 +90,21 @@ impl Reactor for UringReactor {
             };
             match kind {
                 TokenKind::RetiredBuffers => {
-                    // Kernel confirmed RemoveBuffers: the provided backing
-                    // store can be freed now.
-                    self.token_meta.remove(&raw);
+                    if result >= 0 {
+                        // Kernel confirmed RemoveBuffers: the provided
+                        // backing store can be freed now.
+                        self.token_meta.remove(&raw);
+                    }
+                    // On failure the entry (and the buffer it keeps alive)
+                    // is retained deliberately: a bounded leak is safe,
+                    // freeing memory the kernel may still reference is not.
                 }
                 TokenKind::CancelledSubscription => {
+                    // INVARIANT: this close is only valid because AcceptMulti
+                    // is the sole subscription kind (its results are fds).
+                    // cancel() matches exhaustively on NetSubscription; adding
+                    // a non-accept subscription kind must extend this dispatch
+                    // rather than reuse it.
                     if result >= 0 {
                         // Late accept completion after cancel: close the fd
                         // instead of leaking it.
@@ -404,7 +422,11 @@ impl ReactorDriverWait for UringReactor {
             .sec(timeout_ns / 1_000_000_000)
             .nsec((timeout_ns % 1_000_000_000) as u32);
         let args = io_uring::types::SubmitArgs::new().timespec(&timespec);
-        match self.ring.submitter().submit_with_args(1, &args) {
+        match self
+            .ring
+            .submitter()
+            .submit_with_args(min_events.max(1), &args)
+        {
             Ok(_) => {}
             Err(err)
                 if err.raw_os_error() == Some(libc::ETIME)

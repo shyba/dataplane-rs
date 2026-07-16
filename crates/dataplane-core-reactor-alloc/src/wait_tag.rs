@@ -28,6 +28,13 @@ pub enum WaitRef {
     Local { kind: LocalWaitKind, payload: u16 },
 }
 
+/// Raw wait-tag bits that do not decode to a known kind.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WaitDecodeError {
+    /// The 5-bit kind field holds a value with no `LocalWaitKind` mapping.
+    BadLocalKind,
+}
+
 impl TryFrom<u8> for WaitDomain {
     type Error = ();
 
@@ -71,7 +78,9 @@ impl WaitTag {
     #[inline(always)]
     pub const fn new_remote(index: u16) -> Self {
         debug_assert!(index <= Self::REMOTE_INDEX_MASK);
-        Self(index << Self::REMOTE_INDEX_SHIFT)
+        // Mask defensively (matching the no_std twin) so out-of-range input
+        // cannot corrupt adjacent bitfields in release builds.
+        Self((index & Self::REMOTE_INDEX_MASK) << Self::REMOTE_INDEX_SHIFT)
     }
 
     #[inline(always)]
@@ -80,7 +89,7 @@ impl WaitTag {
         Self(
             WaitDomain::Local as u16
                 | ((kind as u16) << Self::LOCAL_KIND_SHIFT)
-                | (payload << Self::LOCAL_PAYLOAD_SHIFT),
+                | ((payload & Self::LOCAL_PAYLOAD_MASK) << Self::LOCAL_PAYLOAD_SHIFT),
         )
     }
 
@@ -106,11 +115,14 @@ impl WaitTag {
         (self.0 >> Self::REMOTE_INDEX_SHIFT) & Self::REMOTE_INDEX_MASK
     }
 
+    /// Decodes the local wait kind. `from_raw` admits kind bits with no
+    /// `LocalWaitKind` mapping (8-30), so this is fallible — matching the
+    /// no_std twin instead of panicking.
     #[inline(always)]
-    pub fn local_kind(self) -> LocalWaitKind {
+    pub fn local_kind(self) -> Result<LocalWaitKind, WaitDecodeError> {
         debug_assert_eq!(self.domain(), WaitDomain::Local);
         let raw = ((self.0 >> Self::LOCAL_KIND_SHIFT) & Self::LOCAL_KIND_MASK) as u8;
-        LocalWaitKind::try_from(raw).unwrap()
+        LocalWaitKind::try_from(raw).map_err(|_| WaitDecodeError::BadLocalKind)
     }
 
     #[inline(always)]
@@ -131,20 +143,23 @@ impl WaitTag {
     pub fn local_ref(self) -> Option<(LocalWaitKind, u16)> {
         match self.domain() {
             WaitDomain::Remote => None,
-            WaitDomain::Local => Some((self.local_kind(), self.local_payload())),
+            WaitDomain::Local => self
+                .local_kind()
+                .ok()
+                .map(|kind| (kind, self.local_payload())),
         }
     }
 
     #[inline(always)]
-    pub fn decode(self) -> WaitRef {
+    pub fn decode(self) -> Result<WaitRef, WaitDecodeError> {
         if let Some(index) = self.remote_ref() {
-            WaitRef::Remote(index)
-        } else {
-            let (kind, payload) = self
-                .local_ref()
-                .expect("local wait tag must provide local kind and payload");
-            WaitRef::Local { kind, payload }
+            return Ok(WaitRef::Remote(index));
         }
+        let kind = self.local_kind()?;
+        Ok(WaitRef::Local {
+            kind,
+            payload: self.local_payload(),
+        })
     }
 }
 
@@ -163,23 +178,23 @@ mod tests {
         let tag = WaitTag::new_remote(32123);
         assert_eq!(tag.domain(), WaitDomain::Remote);
         assert_eq!(tag.remote_index(), 32123);
-        assert_eq!(tag.decode(), WaitRef::Remote(32123));
+        assert_eq!(tag.decode(), Ok(WaitRef::Remote(32123)));
     }
 
     #[test]
     fn local_round_trips() {
         let tag = WaitTag::new_local(LocalWaitKind::Io, 777);
         assert_eq!(tag.domain(), WaitDomain::Local);
-        assert_eq!(tag.local_kind(), LocalWaitKind::Io);
+        assert_eq!(tag.local_kind(), Ok(LocalWaitKind::Io));
         assert_eq!(tag.local_payload(), 777);
         assert_eq!(tag.local_ref(), Some((LocalWaitKind::Io, 777)));
         assert_eq!(tag.remote_ref(), None);
         assert_eq!(
             tag.decode(),
-            WaitRef::Local {
+            Ok(WaitRef::Local {
                 kind: LocalWaitKind::Io,
                 payload: 777,
-            }
+            })
         );
     }
 
@@ -190,10 +205,10 @@ mod tests {
         assert_eq!(tag.local_ref(), Some((LocalWaitKind::Extended, 1023)));
         assert_eq!(
             tag.decode(),
-            WaitRef::Local {
+            Ok(WaitRef::Local {
                 kind: LocalWaitKind::Extended,
                 payload: 1023,
-            }
+            })
         );
     }
 
@@ -205,7 +220,7 @@ mod tests {
             prop_assert_eq!(tag.remote_index(), index);
             prop_assert_eq!(tag.remote_ref(), Some(index));
             prop_assert_eq!(tag.local_ref(), None);
-            prop_assert_eq!(WaitTag::from_raw(tag.raw()).decode(), WaitRef::Remote(index));
+            prop_assert_eq!(WaitTag::from_raw(tag.raw()).decode(), Ok(WaitRef::Remote(index)));
         }
 
         #[test]
@@ -225,13 +240,13 @@ mod tests {
         ) {
             let tag = WaitTag::new_local(kind, payload);
             prop_assert_eq!(tag.domain(), WaitDomain::Local);
-            prop_assert_eq!(tag.local_kind(), kind);
+            prop_assert_eq!(tag.local_kind(), Ok(kind));
             prop_assert_eq!(tag.local_payload(), payload);
             prop_assert_eq!(tag.local_ref(), Some((kind, payload)));
             prop_assert_eq!(tag.remote_ref(), None);
             prop_assert_eq!(
                 WaitTag::from_raw(tag.raw()).decode(),
-                WaitRef::Local { kind, payload }
+                Ok(WaitRef::Local { kind, payload })
             );
         }
     }

@@ -1,8 +1,16 @@
 #[cfg(debug_assertions)]
+fn env_var_with_legacy(name: &str, legacy: &str) -> Option<String> {
+    std::env::var(name).ok().or_else(|| {
+        // Legacy prefix from before this module moved out of the ranch_uring
+        // application; still honored so existing scripts keep working.
+        std::env::var(legacy).ok()
+    })
+}
+
+#[cfg(debug_assertions)]
 fn configured_debug_phase_stats() -> bool {
     matches!(
-        std::env::var("RANCH_URING_DEBUG_PHASE_STATS")
-        .ok()
+        env_var_with_legacy("DATAPLANE_DEBUG_PHASE_STATS", "RANCH_URING_DEBUG_PHASE_STATS")
         .as_deref()
         .map(|s| s.trim().to_ascii_lowercase()),
         Some(ref v) if v == "1" || v == "true" || v == "yes" || v == "on"
@@ -11,8 +19,7 @@ fn configured_debug_phase_stats() -> bool {
 
 #[cfg(debug_assertions)]
 fn configured_debug_phase_every() -> u64 {
-    std::env::var("RANCH_URING_DEBUG_PHASE_EVERY")
-        .ok()
+    env_var_with_legacy("DATAPLANE_DEBUG_PHASE_EVERY", "RANCH_URING_DEBUG_PHASE_EVERY")
         .and_then(|s| s.parse::<u64>().ok())
         .filter(|v| *v > 0)
         .unwrap_or(10_000)

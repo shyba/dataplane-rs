@@ -1,4 +1,3 @@
-mod completion;
 mod facade;
 mod task;
 

@@ -1,3 +1,18 @@
+//! Host-engine future adapter: wraps a `Future<Output = ()>` as a
+//! [`NativeTask`] for `NativeTaskEngine`. This is the canonical adapter for
+//! host runtimes (`RuntimeFutureTask` in `mailbox_future`); the sibling
+//! `future_task::FutureTask` is the embedded adapter with an explicit
+//! `TaskHeader` state machine used by bare-metal targets (e.g. RP2040).
+//!
+//! # Waker invariant
+//!
+//! Futures are polled with a **no-op waker**. A future's own
+//! `cx.waker().wake()` does nothing: re-execution comes only from the
+//! engine — `PendingAction::Ready` busy-requeues, and
+//! `PendingAction::Parked` tasks run again only when something external
+//! (mailbox signal delivery, an I/O completion carrying
+//! `WakeHandle::LocalTask`, or `NativeTaskEngine::wake`) requeues them.
+//! Do not wrap futures that depend on waker registration for progress.
 use crate::future_task::PinnedFuture;
 use crate::native_task::{NativeTask, NativeTaskCx, StepResult};
 use core::future::Future;

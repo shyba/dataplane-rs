@@ -72,6 +72,10 @@ impl InflightTable {
         }
     }
 
+    /// Allocates a token. Panics only when the table would exceed
+    /// `u32::MAX` simultaneously in-flight ops — an intentional hard bound,
+    /// unreachable before the process runs out of memory for the ops
+    /// themselves.
     #[inline(always)]
     pub fn alloc(&mut self, wake: WakeHandle) -> OpToken {
         if self.free_head == u32::MAX {
@@ -85,6 +89,11 @@ impl InflightTable {
         OpToken(((slot.generation as u64) << 32) | (idx as u64 + 1))
     }
 
+    /// Claims the exact slot a previously-minted token names. The external
+    /// token protocol allows re-inserting the most recently removed token
+    /// (whose generation is one behind the slot after release), but tokens
+    /// from earlier lives are rejected: a stale token must not resurrect a
+    /// recycled slot and roll its generation further backwards.
     #[inline(always)]
     pub fn insert_exact(&mut self, token: OpToken, wake: WakeHandle) -> bool {
         let raw_idx = token.0 as u32;
@@ -96,7 +105,7 @@ impl InflightTable {
         let Some(slot) = self.slots.get(idx) else {
             return false;
         };
-        if slot.active {
+        if slot.active || slot.generation.wrapping_sub(generation) > 1 {
             return false;
         }
         if self.unlink_free(idx as u32).is_none() {
@@ -129,6 +138,11 @@ impl InflightTable {
     #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.active == 0
+    }
+
+    #[cfg(test)]
+    fn force_slot_generation(&mut self, idx: usize, generation: u32) {
+        self.slots[idx].generation = generation;
     }
 
     fn grow(&mut self) {
@@ -268,5 +282,49 @@ mod tests {
                 prop_assert!(!table.insert_exact(OpToken(0), WakeHandle::None));
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod generation_wrap_tests {
+    use super::InflightTable;
+    use crate::wake_handle::WakeHandle;
+
+    #[test]
+    fn stale_token_from_earlier_life_cannot_resurrect_slot() {
+        let mut table = InflightTable::with_capacity(1);
+        let first_life = table.alloc(WakeHandle::None);
+        assert!(table.remove(first_life).is_some());
+        // Advance the slot two lives past the first token.
+        let second_life = table.alloc(WakeHandle::None);
+        assert!(table.remove(second_life).is_some());
+
+        assert!(
+            !table.insert_exact(first_life, WakeHandle::None),
+            "token two generations behind must be rejected"
+        );
+        assert!(table.insert_exact(second_life, WakeHandle::None));
+    }
+
+    /// Documents the ABA bound: after 2^32 release cycles a slot's
+    /// generation wraps and a token from its first life aliases a live
+    /// token. Callers rely on op lifetimes being far shorter than 2^32
+    /// recycles of one slot; this test pins the boundary behavior so the
+    /// assumption is explicit rather than silent.
+    #[test]
+    fn generation_wrap_aliases_first_life_token() {
+        let mut table = InflightTable::with_capacity(1);
+        let first_life = table.alloc(WakeHandle::None);
+        assert!(table.remove(first_life).is_some());
+
+        table.force_slot_generation(0, u32::MAX);
+        let last = table.alloc(WakeHandle::None);
+        assert!(table.remove(last).is_some());
+
+        let wrapped = table.alloc(WakeHandle::None);
+        assert_eq!(
+            wrapped, first_life,
+            "generation wrapped back to the first-life token (known 2^32 bound)"
+        );
     }
 }

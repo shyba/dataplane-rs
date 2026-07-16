@@ -726,9 +726,10 @@ impl ReactorDriverWait for SyscallReactor {
                 .div_ceil(1_000_000)
                 .min(i32::MAX as u64) as i32;
             if !self.wait_for_epoll_timeout(timeout_ms) {
-                std::thread::sleep(Duration::from_nanos(
-                    timeout_ns.min(50_000),
-                ));
+                // No epoll: sleep a bounded slice of the deadline. 1ms keeps
+                // pending-op retries responsive without the previous 50us
+                // busy-spin across long deadlines.
+                std::thread::sleep(Duration::from_nanos(timeout_ns.min(1_000_000)));
             }
             let events = self.poll_once();
             let count = events.len();

@@ -32,8 +32,8 @@ thread_local! {
     static CURRENT_SIGNAL_PARKER: Cell<Option<SignalParker>> = const { Cell::new(None) };
 }
 
-#[cfg(test)]
-pub(crate) struct SharedWakeGuard {
+/// Restores the previous shared wake handle when dropped.
+pub struct SharedWakeGuard {
     prev: Option<SharedTaskWakeHandle>,
 }
 
@@ -57,7 +57,6 @@ pub struct SignalParkGuard {
     prev: Option<SignalParker>,
 }
 
-#[cfg(test)]
 impl Drop for SharedWakeGuard {
     #[inline(always)]
     fn drop(&mut self) {
@@ -144,9 +143,15 @@ fn current_thread_shard_with<B: ThreadCtxBackend>(shard_count: usize) -> usize {
     assigned % shard_count
 }
 
+/// Installs the shard's shared wake handle for the current thread so
+/// cross-shard receivers polled on this thread can register a reactor wake
+/// (`remote_future` falls back to this when no signal parker is installed).
+/// Hosts embedding remote futures on a reactor thread should hold the
+/// returned guard for the thread's lifetime; without it,
+/// `current_shared_wake()` is `None` and receivers rely solely on the
+/// signal-parker path.
 #[inline(always)]
-#[cfg(test)]
-pub(crate) fn enter_current_shared_wake(handle: SharedTaskWakeHandle) -> SharedWakeGuard {
+pub fn enter_current_shared_wake(handle: SharedTaskWakeHandle) -> SharedWakeGuard {
     let prev = CURRENT_SHARED_WAKE.with(|slot| slot.replace(Some(handle)));
     SharedWakeGuard { prev }
 }

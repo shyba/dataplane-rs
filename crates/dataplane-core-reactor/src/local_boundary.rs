@@ -25,16 +25,7 @@ impl<T> LocalShardPublisher<T> {
     where
         F: FnMut(usize, &mut Vec<T>),
     {
-        let should_flush = {
-            let shard_batch = &mut self.shards[shard];
-            shard_batch.staged.push(item);
-            shard_batch.weight += 1;
-            shard_batch.weight >= self.weight_budget
-        };
-        if should_flush {
-            let mut publish = publish;
-            self.flush_shard(shard, &mut publish);
-        }
+        self.push_known_weight(shard, item, 1, publish);
     }
 
     pub fn push_weighted<F>(&mut self, shard: usize, item: T, weight: usize, publish: F)
@@ -82,5 +73,59 @@ impl<T> LocalShardPublisher<T> {
         }
         publish(shard, &mut shard_batch.staged);
         shard_batch.staged.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LocalShardPublisher;
+
+    fn collect_publishes(
+        publisher: &mut LocalShardPublisher<u32>,
+        pushes: &[(usize, u32)],
+    ) -> Vec<(usize, Vec<u32>)> {
+        let mut published = Vec::new();
+        for &(shard, item) in pushes {
+            publisher.push(shard, item, |shard, staged| {
+                published.push((shard, staged.clone()));
+            });
+        }
+        published
+    }
+
+    #[test]
+    fn push_flushes_when_weight_budget_reached() {
+        let mut publisher = LocalShardPublisher::new(2, 2);
+        let published = collect_publishes(&mut publisher, &[(0, 1), (1, 10), (0, 2)]);
+        assert_eq!(published, vec![(0, vec![1, 2])]);
+    }
+
+    #[test]
+    fn flush_all_publishes_remaining_and_skips_empty_shards() {
+        let mut publisher = LocalShardPublisher::new(3, 100);
+        publisher.push(0, 1, |_, _| unreachable!("under budget"));
+        publisher.push(2, 3, |_, _| unreachable!("under budget"));
+
+        let mut published = Vec::new();
+        publisher.flush_all(|shard, staged| published.push((shard, staged.clone())));
+        assert_eq!(published, vec![(0, vec![1]), (2, vec![3])]);
+
+        published.clear();
+        publisher.flush_all(|shard, staged| published.push((shard, staged.clone())));
+        assert!(published.is_empty());
+    }
+
+    #[test]
+    fn weighted_push_reaches_budget_faster() {
+        let mut publisher = LocalShardPublisher::new(1, 4);
+        let mut published = Vec::new();
+        publisher.push_weighted(0, 7, 0, |shard, staged| {
+            published.push((shard, staged.clone()))
+        });
+        assert!(published.is_empty(), "zero weight is clamped to 1");
+        publisher.push_weighted(0, 8, 3, |shard, staged| {
+            published.push((shard, staged.clone()))
+        });
+        assert_eq!(published, vec![(0, vec![7, 8])]);
     }
 }

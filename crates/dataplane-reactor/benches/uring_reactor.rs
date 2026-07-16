@@ -225,8 +225,8 @@ fn run_udp_pairs(rounds: usize, pair_count: usize, backend: ReactorBackend) -> u
     let mut pairs = Vec::with_capacity(pair_count);
     for pair_id in 0..pair_count {
         pairs.push(BenchPair::new(rounds));
-        ready.push(pair_id * 2, PairActor::Client(pair_id));
-        ready.push(pair_id * 2 + 1, PairActor::Server(pair_id));
+        ready.push(pair_id * 2, PairActor::Client(pair_id)).expect("push");
+        ready.push(pair_id * 2 + 1, PairActor::Server(pair_id)).expect("push");
     }
 
     let mut completed_pairs = 0usize;
@@ -388,7 +388,7 @@ fn handle_pair_completion(
             assert_eq!(kind, NetOpKind::UdpSend);
             assert_eq!(result as usize, pair.client_tx.len());
             pair.client_phase = PairPhase::ReadyRecv;
-            ready.push(pair_id * 2, PairActor::Client(pair_id));
+            ready.push(pair_id * 2, PairActor::Client(pair_id)).expect("push");
         }
         Route::ClientRecv { pair_id } => {
             let pair = &mut pairs[pair_id];
@@ -400,7 +400,7 @@ fn handle_pair_completion(
             pair.seq += 1;
             if pair.seq < pair.rounds {
                 pair.client_phase = PairPhase::ReadySend;
-                ready.push(pair_id * 2, PairActor::Client(pair_id));
+                ready.push(pair_id * 2, PairActor::Client(pair_id)).expect("push");
             } else {
                 pair.client_phase = PairPhase::Done;
                 if pair.done() {
@@ -413,7 +413,7 @@ fn handle_pair_completion(
             assert_eq!(kind, NetOpKind::UdpRecv);
             pair.last_server_recv = result as usize;
             pair.server_phase = ServerPhase::ReadySend;
-            ready.push(pair_id * 2 + 1, PairActor::Server(pair_id));
+            ready.push(pair_id * 2 + 1, PairActor::Server(pair_id)).expect("push");
         }
         Route::ServerSend { pair_id } => {
             let pair = &mut pairs[pair_id];
@@ -427,7 +427,7 @@ fn handle_pair_completion(
                 }
             } else {
                 pair.server_phase = ServerPhase::ReadyRecv;
-                ready.push(pair_id * 2 + 1, PairActor::Server(pair_id));
+                ready.push(pair_id * 2 + 1, PairActor::Server(pair_id)).expect("push");
             }
         }
     }

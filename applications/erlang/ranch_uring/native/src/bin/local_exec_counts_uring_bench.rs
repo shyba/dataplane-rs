@@ -79,7 +79,7 @@ fn run_shard(
 ) -> usize {
     let mut local_exec = LocalExecCounts::new(slots_per_shard);
     for slot in 0..slots_per_shard {
-        local_exec.push_count(slot, ops_per_slot);
+        local_exec.push_count(slot, ops_per_slot).expect("push_count");
     }
 
     let mut ring = IoUring::new(ring_entries).expect("create io_uring");

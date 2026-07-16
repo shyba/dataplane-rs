@@ -1,3 +1,8 @@
+//! Embedded future adapter with an explicit `TaskHeader` state machine and
+//! `WaitTag` integration, consumed by bare-metal targets (RP2040 smoke
+//! firmware via `dataplane_runtime::rp2040`). Host runtimes use
+//! `native_future_task::NativeFutureTask` instead — see that module for the
+//! waker invariant shared by both adapters.
 use crate::wait_tag::{LocalWaitKind, WaitTag};
 use alloc::boxed::Box;
 use core::future::Future;
@@ -163,10 +168,10 @@ mod tests {
         let header = TaskHeader::new(WaitTag::new_local(LocalWaitKind::Io, 9));
         assert_eq!(
             header.wait().decode(),
-            WaitRef::Local {
+            Ok(WaitRef::Local {
                 kind: LocalWaitKind::Io,
                 payload: 9,
-            }
+            })
         );
     }
 

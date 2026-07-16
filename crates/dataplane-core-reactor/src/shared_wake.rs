@@ -6,8 +6,13 @@ struct SharedTaskWake {
     reactor_pending: Arc<AtomicBool>,
 }
 
+/// Cross-thread wake handle for a shard loop: `wake()` sets a task-pending
+/// flag and, on the first pending transition, a reactor-pending flag the
+/// host's wait loop is expected to poll. Construct one per shard thread and
+/// install it with `runtime_tls::enter_current_shared_wake` so cross-shard
+/// receivers polled on that thread can register reactor wakes.
 #[derive(Clone)]
-pub(crate) struct SharedTaskWakeHandle(Arc<SharedTaskWake>);
+pub struct SharedTaskWakeHandle(Arc<SharedTaskWake>);
 
 // Manual PartialEq: compare pointer identity of the Arc, not the contents.
 // Two SharedTaskWakeHandles are equal iff they point to the same allocation.
@@ -24,9 +29,8 @@ impl std::fmt::Debug for SharedTaskWakeHandle {
 }
 
 impl SharedTaskWakeHandle {
-    #[cfg(test)]
     #[inline(always)]
-    pub(crate) fn new(
+    pub fn new(
         pending: Arc<AtomicBool>,
         reactor_pending: Arc<AtomicBool>,
     ) -> SharedTaskWakeHandle {
@@ -37,7 +41,7 @@ impl SharedTaskWakeHandle {
     }
 
     #[inline(always)]
-    pub(crate) fn wake(&self) {
+    pub fn wake(&self) {
         if !self.0.pending.swap(true, Ordering::AcqRel) {
             self.0.reactor_pending.store(true, Ordering::Release);
         }
