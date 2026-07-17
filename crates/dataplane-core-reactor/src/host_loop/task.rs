@@ -98,11 +98,11 @@ where
         self.runtime.outstanding() != 0
     }
 
-    #[inline(always)]
     /// True when at least one task is queued to run now. Distinct from
     /// [`HostLoop::has_task_work`], which counts *alive* (possibly parked)
     /// tasks: controllers must use the ready signal to decide whether
     /// running tasks can make progress.
+    #[inline(always)]
     pub fn has_ready_task_work(&self) -> bool {
         self.tasks.ready_len() > 0
     }

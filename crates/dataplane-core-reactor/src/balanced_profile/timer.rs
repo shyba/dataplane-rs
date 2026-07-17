@@ -332,6 +332,12 @@ fn drain_expired_sorted<F>(
 where
     F: FnMut(BalancedTimerWake),
 {
+    // O(1) early-out for the common no-expired case before paying the
+    // binary search.
+    match entries.first() {
+        Some(entry) if entry.deadline_ns <= now_ns => {}
+        _ => return 0,
+    }
     let expired = entries.partition_point(|entry| entry.deadline_ns <= now_ns);
     let count = expired.min(wake_batch);
     for entry in entries.drain(..count) {

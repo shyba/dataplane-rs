@@ -129,29 +129,31 @@ where
         F: FnMut(D::Event),
         W: FnMut(u64),
     {
+        let has_ready_task_work = host.has_ready_task_work();
         let controller_step =
             self.controller
-                .step(now_ns, host.has_runtime_work(), host.has_ready_task_work());
-
-        // Any wait must be bounded by the next timer deadline, including the
-        // Continue-with-outstanding-IO case (a pending op must not block past
-        // an armed timer).
-        let timer_timeout_ns = self
-            .controller
-            .next_deadline()
-            .map(|deadline_ns| deadline_ns.saturating_sub(now_ns));
+                .step(now_ns, host.has_runtime_work(), has_ready_task_work);
 
         let (events, tasks) = match controller_step.host_action {
-            BalancedHostAction::Continue if host.has_ready_task_work() => {
+            BalancedHostAction::Continue if has_ready_task_work => {
                 host.tick(max_events, task_budget, on_event)?
             }
-            BalancedHostAction::Continue => host.tick_or_wait_deadline(
-                max_events,
-                min_events,
-                task_budget,
-                timer_timeout_ns,
-                on_event,
-            )?,
+            BalancedHostAction::Continue => {
+                // Bound the wait by the next timer deadline: a pending op
+                // must not block past an armed timer. Computed only on this
+                // (wait-bound) arm to keep the ready hot path branch-lean.
+                let timer_timeout_ns = self
+                    .controller
+                    .next_deadline()
+                    .map(|deadline_ns| deadline_ns.saturating_sub(now_ns));
+                host.tick_or_wait_deadline(
+                    max_events,
+                    min_events,
+                    task_budget,
+                    timer_timeout_ns,
+                    on_event,
+                )?
+            }
             BalancedHostAction::WaitUntil { deadline_ns } => {
                 before_wait_until(deadline_ns);
                 let timeout_ns = deadline_ns.saturating_sub(now_ns);
@@ -230,22 +232,24 @@ where
             .controller
             .step(now_ns, has_runtime_work, has_ready_task_work);
 
-        // Bound every wait by the next timer deadline (see tick_or_wait).
-        let timer_timeout_ns = self
-            .controller
-            .next_deadline()
-            .map(|deadline_ns| deadline_ns.saturating_sub(now_ns));
-
         let (completions, tasks) = match controller_step.host_action {
             BalancedHostAction::Continue if has_ready_task_work => {
                 host.tick_completions(max_events, task_budget)?
             }
-            BalancedHostAction::Continue => host.tick_completions_or_wait_deadline(
-                max_events,
-                min_events,
-                task_budget,
-                timer_timeout_ns,
-            )?,
+            BalancedHostAction::Continue => {
+                // Bound the wait by the next timer deadline (see tick_or_wait);
+                // computed only on this wait-bound arm.
+                let timer_timeout_ns = self
+                    .controller
+                    .next_deadline()
+                    .map(|deadline_ns| deadline_ns.saturating_sub(now_ns));
+                host.tick_completions_or_wait_deadline(
+                    max_events,
+                    min_events,
+                    task_budget,
+                    timer_timeout_ns,
+                )?
+            }
             BalancedHostAction::WaitUntil { deadline_ns } => {
                 policy.before_wait_until(deadline_ns);
                 let timeout_ns = deadline_ns.saturating_sub(now_ns);

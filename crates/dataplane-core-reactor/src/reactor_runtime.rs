@@ -83,6 +83,7 @@ impl<D> ReactorRuntime<D>
 where
     D: ReactorDriver + ReactorDriverWait<Error = <D as ReactorDriver>::Error>,
 {
+    #[inline(always)]
     pub fn drain_or_wait<F>(
         &mut self,
         max_events: usize,
@@ -98,6 +99,7 @@ where
     /// Like [`ReactorRuntime::drain_or_wait`], but bounds the blocking wait
     /// by `timeout_ns` when given, so timer deadlines are honored while
     /// IO-idle.
+    #[inline(always)]
     pub fn drain_or_wait_deadline<F>(
         &mut self,
         max_events: usize,
