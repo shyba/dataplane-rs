@@ -123,11 +123,13 @@ impl WaitTag {
 
     #[inline(always)]
     pub const fn new_remote(index: u16) -> Self {
+        debug_assert!(index <= Self::REMOTE_INDEX_MASK);
         Self((index & Self::REMOTE_INDEX_MASK) << Self::REMOTE_INDEX_SHIFT)
     }
 
     #[inline(always)]
     pub const fn new_local(kind: LocalWaitKind, payload: u16) -> Self {
+        debug_assert!(payload <= Self::LOCAL_PAYLOAD_MASK);
         Self(
             WaitDomain::Local as u16
                 | ((kind as u16) << Self::LOCAL_KIND_SHIFT)

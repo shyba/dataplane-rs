@@ -55,6 +55,10 @@ impl LocalExecCounts {
         self.pending != 0
     }
 
+    pub fn pending(&self) -> usize {
+        self.pending
+    }
+
     pub fn drain<F>(
         &mut self,
         runnable_budget: usize,
