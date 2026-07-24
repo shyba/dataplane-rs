@@ -6,6 +6,8 @@ use std::hint::black_box;
 use std::net::UdpSocket;
 #[cfg(target_os = "linux")]
 use std::os::fd::RawFd;
+#[cfg(target_os = "linux")]
+use std::time::{Duration, Instant};
 
 #[cfg(target_os = "linux")]
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
@@ -34,6 +36,13 @@ const UDP_PAYLOAD_LEN: usize = 64;
 const UDP_ROUNDS: &[usize] = &[64, 256];
 #[cfg(target_os = "linux")]
 const UDP_PAIRS: &[usize] = &[1, 2, 4, 8];
+/// Bounded blocking wait so a never-arriving completion cannot hang the run forever.
+#[cfg(target_os = "linux")]
+const WAIT_TIMEOUT_NS: u64 = 100_000_000;
+/// Per-run watchdog: loopback ping-pong completes in well under a second, so a stall
+/// past this is a bug and must fail fast rather than deadlock.
+#[cfg(target_os = "linux")]
+const UDP_STALL_LIMIT: Duration = Duration::from_secs(30);
 
 #[cfg(target_os = "linux")]
 struct IdleTask;
@@ -94,6 +103,7 @@ struct BenchPair {
     client_rx: [u8; UDP_PAYLOAD_LEN],
     server_rx: [u8; UDP_PAYLOAD_LEN],
     seq: usize,
+    server_seq: usize,
     rounds: usize,
     last_server_recv: usize,
     client_phase: PairPhase,
@@ -116,6 +126,7 @@ impl BenchPair {
             client_rx: [0u8; UDP_PAYLOAD_LEN],
             server_rx: [0u8; UDP_PAYLOAD_LEN],
             seq: 0,
+            server_seq: 0,
             rounds,
             last_server_recv: 0,
             client_phase: PairPhase::ReadySend,
@@ -230,7 +241,14 @@ fn run_udp_pairs(rounds: usize, pair_count: usize, backend: ReactorBackend) -> u
     }
 
     let mut completed_pairs = 0usize;
+    let start = Instant::now();
     while completed_pairs < pair_count {
+        assert!(
+            start.elapsed() < UDP_STALL_LIMIT,
+            "udp ping-pong stalled: {completed_pairs}/{pair_count} pairs, {} routes outstanding after {:?}",
+            routes.len(),
+            start.elapsed()
+        );
         let mut progressed = 0usize;
         progressed += ready.drain(pair_count.saturating_mul(2).max(1), 1, false, |actor| {
             drive_pair_actor(&mut reactor, &mut pairs, actor, &mut routes);
@@ -238,7 +256,10 @@ fn run_udp_pairs(rounds: usize, pair_count: usize, backend: ReactorBackend) -> u
 
         let mut events = reactor.poll(false, usize::MAX).expect("poll pair reactor");
         if events.is_empty() && progressed == 0 && !routes.is_empty() {
-            events = reactor.poll(true, usize::MAX).expect("wait pair reactor");
+            let (waited, _) = reactor
+                .tick_completions_or_wait_deadline(usize::MAX, 1, 0, Some(WAIT_TIMEOUT_NS))
+                .expect("wait pair reactor");
+            events = waited;
         }
 
         for event in events {
@@ -420,7 +441,8 @@ fn handle_pair_completion(
             assert_eq!(kind, NetOpKind::UdpSend);
             assert_eq!(result as usize, pair.last_server_recv);
             pair.completed += 2;
-            if pair.seq >= pair.rounds {
+            pair.server_seq += 1;
+            if pair.server_seq >= pair.rounds {
                 pair.server_phase = ServerPhase::Done;
                 if pair.done() {
                     *completed_pairs += 1;
