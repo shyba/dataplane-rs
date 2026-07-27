@@ -16,8 +16,8 @@ pub use scheduler::LocalMeshScheduler;
 pub use task_cell::{TaskCell, TaskPayload};
 pub use trace::{TraceStamp, TraceStep, TRACE_STAMP_DEPTH};
 pub use types::{
-    SchedulerPlacement, ShardSchedulerConfig, SubmitPlacement, TaskId, TaskMeta, TaskPriority,
-    TaskScope, TickReport, WorkDisposition,
+    SchedulerPlacement, SchedulerStats, ShardSchedulerConfig, SubmitPlacement, TaskId, TaskMeta,
+    TaskPriority, TaskScope, TickReport, WorkDisposition,
 };
 
 #[cfg(test)]

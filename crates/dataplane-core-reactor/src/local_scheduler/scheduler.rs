@@ -11,8 +11,8 @@ use super::push::{PushPolicy, TopologyRoutePush};
 use super::task_cell::{poll_async_future, TaskCell, TaskPayload};
 use super::trace::{TraceStamp, TraceStep, TRACE_STAMP_DEPTH};
 use super::types::{
-    SchedulerPlacement, ShardSchedulerConfig, SubmitPlacement, TaskId, TaskPriority, TaskScope,
-    TickReport, WorkDisposition,
+    SchedulerPlacement, SchedulerStats, ShardSchedulerConfig, SubmitPlacement, TaskId,
+    TaskPriority, TaskScope, TickReport, WorkDisposition,
 };
 
 pub struct LocalMeshScheduler<
@@ -39,6 +39,7 @@ pub struct LocalMeshScheduler<
     clock: Clock,
     focus_check_interval: usize,
     ticks_since_focus_scale: usize,
+    stats: SchedulerStats,
     _focus: std::marker::PhantomData<Focus>,
     _push: std::marker::PhantomData<Push>,
 }
@@ -89,6 +90,7 @@ impl<Op, const STACK_BYTES: usize, Focus: FocusPolicy, Push: PushPolicy>
             focus_check_interval: config.poll_in_place_time_check_interval.max(1),
             // Force first tick to calibrate immediately when scaling is enabled.
             ticks_since_focus_scale: config.poll_in_place_clock_rescale_ticks.max(1),
+            stats: SchedulerStats::default(),
             _focus: std::marker::PhantomData,
             _push: std::marker::PhantomData,
         }
@@ -505,7 +507,21 @@ impl<Op, const STACK_BYTES: usize, Focus: FocusPolicy, Push: PushPolicy>
             idle_ns = report.idle_ns,
             "tick_end"
         );
+        self.stats.fold(&report);
         report
+    }
+
+    /// Cumulative telemetry folded from every [`tick`](Self::tick) on this shard.
+    /// Cheap struct copy; aggregate across shards by summing snapshots.
+    #[inline(always)]
+    pub fn stats(&self) -> SchedulerStats {
+        self.stats
+    }
+
+    /// Reset the cumulative counters (e.g. after exporting a snapshot interval).
+    #[inline(always)]
+    pub fn reset_stats(&mut self) {
+        self.stats = SchedulerStats::default();
     }
 
     fn accept_or_deflect(&mut self, task: TaskCell<Op, STACK_BYTES>, report: &mut TickReport) {

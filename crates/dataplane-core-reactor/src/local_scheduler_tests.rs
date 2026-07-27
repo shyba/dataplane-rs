@@ -92,6 +92,50 @@ fn domain_scope_offloads_within_domain() {
 }
 
 #[test]
+fn stats_accumulate_across_ticks_and_reset_clears_them() {
+    let placements = sample_placements();
+    let mesh = build_shard_mesh::<TaskCell<u64, 256>>(4, 8).remove(0);
+    let (bus_tx, bus_rx) = kanal::bounded::<TaskCell<u64, 256>>(1024);
+    let bus_rx = Arc::new(bus_rx);
+    let mut s = LocalMeshScheduler::<u64, 256>::new(
+        placements[0],
+        &placements,
+        mesh,
+        bus_tx,
+        bus_rx,
+        ShardSchedulerConfig::default(),
+    );
+
+    assert_eq!(s.stats(), SchedulerStats::default());
+
+    for v in 0..3u64 {
+        let placement = s.submit_work(TaskMeta::local(TaskPriority::Normal), v);
+        assert!(matches!(placement, Ok(SubmitPlacement::Local(_))));
+    }
+
+    let mut ran = 0usize;
+    let _ = s.tick(|_| {
+        ran += 1;
+        WorkDisposition::AllDone
+    });
+    assert_eq!(ran, 3);
+
+    let after_first = s.stats();
+    assert_eq!(after_first.ticks, 1);
+    assert_eq!(after_first.local_executed, 3);
+    assert!((0.0..=1.0).contains(&after_first.utilization()));
+
+    // An empty tick advances only the tick counter, proving the fold is cumulative.
+    let _ = s.tick(|_| WorkDisposition::AllDone);
+    let after_second = s.stats();
+    assert_eq!(after_second.ticks, 2);
+    assert_eq!(after_second.local_executed, after_first.local_executed);
+
+    s.reset_stats();
+    assert_eq!(s.stats(), SchedulerStats::default());
+}
+
+#[test]
 fn mesh_zero_spill_reports_full_when_ring_is_full() {
     let mut mesh = build_shard_mesh::<u64>(2, 1);
     assert_eq!(mesh[0].try_push_admit(1, 10), Ok(()));

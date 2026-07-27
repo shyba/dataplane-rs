@@ -141,3 +141,56 @@ pub struct TickReport {
     pub focus_exit_missing_task: usize,
     pub focus_exit_queue_empty: usize,
 }
+
+/// Cumulative, per-shard scheduler telemetry folded from every [`TickReport`].
+///
+/// Each shard owns its scheduler single-threaded, so these are plain counters with
+/// no atomics: folding is a hot-path `+=` and [`snapshot`](LocalMeshScheduler::stats)
+/// is a struct copy. Aggregate across shards by summing snapshots. This is the durable
+/// record of shed/drop/offload activity that a bare `TickReport` throws away each tick.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SchedulerStats {
+    pub ticks: u64,
+    pub local_executed: u64,
+    pub ingress_drained: u64,
+    pub bus_drained: u64,
+    pub offloaded: u64,
+    pub bus_deferred: u64,
+    /// Low-priority deferrals rejected because the bounded bus was full (load shed).
+    pub bus_rejected: u64,
+    /// Tasks dropped outright under saturation.
+    pub dropped: u64,
+    /// Time spent draining ingress plus focused execution (`drain_ns + focus_ns`).
+    pub busy_ns: u64,
+    pub idle_ns: u64,
+}
+
+impl SchedulerStats {
+    #[inline]
+    pub fn fold(&mut self, report: &TickReport) {
+        self.ticks = self.ticks.saturating_add(1);
+        self.local_executed = self.local_executed.saturating_add(report.local_executed as u64);
+        self.ingress_drained = self.ingress_drained.saturating_add(report.ingress_drained as u64);
+        self.bus_drained = self.bus_drained.saturating_add(report.bus_drained as u64);
+        self.offloaded = self.offloaded.saturating_add(report.offloaded as u64);
+        self.bus_deferred = self.bus_deferred.saturating_add(report.bus_deferred as u64);
+        self.bus_rejected = self.bus_rejected.saturating_add(report.bus_rejected as u64);
+        self.dropped = self.dropped.saturating_add(report.dropped as u64);
+        self.busy_ns = self
+            .busy_ns
+            .saturating_add(report.drain_ns)
+            .saturating_add(report.focus_ns);
+        self.idle_ns = self.idle_ns.saturating_add(report.idle_ns);
+    }
+
+    /// Fraction of observed time spent doing work, in `[0.0, 1.0]`. Returns 0 before
+    /// any time has accrued.
+    #[inline]
+    pub fn utilization(&self) -> f64 {
+        let total = self.busy_ns.saturating_add(self.idle_ns);
+        if total == 0 {
+            return 0.0;
+        }
+        self.busy_ns as f64 / total as f64
+    }
+}
