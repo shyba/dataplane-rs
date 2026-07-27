@@ -5,7 +5,8 @@ use super::{
     build_profiled_runtime_with_policy, dispatch_profile_layout_from_profile,
     dispatch_profiled_runtime_from_profile_with_policy, embedded_profile_layout,
     layout_for_profile, performance_profile_layout, BalancedRecordingHostPolicy,
-    EmbeddedResourceError, ProfileKind, ProfiledRuntime, RuntimeLoopHandle, TopologyProfile,
+    EmbeddedResourceError, ProfileKind, ProfiledRuntime, RuntimeLoopHandle, RuntimeStats,
+    StatsCadence, TopologyProfile,
 };
 use dataplane_core_reactor::balanced_profile::{ParkStoreOps, TimerStoreOps};
 use dataplane_core_reactor::native_task::{NativeTask, NativeTaskCx, StepResult};
@@ -281,6 +282,35 @@ fn profiled_runtime_stats_fold_across_ticks_and_capture_gauges() {
     assert_eq!(snap.continue_ticks, 2);
     assert_eq!(snap.active_tasks, 0);
     assert_eq!(snap.tasks_dropped, 0);
+}
+
+#[test]
+fn take_stats_yields_per_interval_deltas_gated_by_cadence() {
+    let mut runtime = RuntimeLoopHandle::new(build_embedded_runtime::<DummyDriver, CountTask>(
+        DummyDriver::default(),
+        4,
+    ));
+    let mut cadence = StatsCadence::new(10);
+    let mut intervals: Vec<RuntimeStats> = Vec::new();
+
+    runtime
+        .try_spawn(CountTask { remaining: 2 })
+        .expect("spawn bounded embedded task");
+
+    // Tick at t=1,2 (one interval), then t=11 crosses the 10ns cadence boundary.
+    for now_ns in [1u64, 2, 11] {
+        let _ = runtime.inner.tick(now_ns, 1, 1, |_| {}).expect("tick");
+        if cadence.due(now_ns) {
+            intervals.push(runtime.inner.take_stats());
+        }
+    }
+
+    // Two exports: the first at t=1 (nothing folded yet before this tick... folded=1),
+    // the second at t=11. Deltas must not overlap.
+    assert_eq!(intervals.len(), 2);
+    let total = RuntimeStats::aggregate(&intervals);
+    assert_eq!(total.ticks, intervals[0].ticks + intervals[1].ticks);
+    assert_eq!(total.tasks_run, 2, "both task steps counted exactly once across deltas");
 }
 
 #[test]

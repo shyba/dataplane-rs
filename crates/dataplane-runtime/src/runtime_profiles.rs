@@ -23,7 +23,7 @@ mod profiled_runtime;
 pub use builders::*;
 pub use dispatch::*;
 pub use loop_handle::{RuntimeLoop, RuntimeLoopHandle};
-pub use profiled_runtime::ProfiledRuntime;
+pub use profiled_runtime::{ProfiledRuntime, RuntimeStats, StatsCadence};
 
 #[cfg(test)]
 #[path = "runtime_profiles_tests.rs"]

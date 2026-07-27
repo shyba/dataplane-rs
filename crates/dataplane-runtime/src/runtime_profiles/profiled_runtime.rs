@@ -1,6 +1,6 @@
 pub use dataplane_core_reactor::balanced_profile::{
     BalancedHostPolicy, BalancedProfileLayout, BalancedRecordingHostPolicy, BalancedRuntime,
-    RuntimeStats,
+    RuntimeStats, StatsCadence,
 };
 use dataplane_core_reactor::balanced_profile::{
     EmbeddedParkStore, EmbeddedTimerStore, PerformanceParkStore, PerformanceTimerStore,
@@ -100,6 +100,17 @@ where
             Self::Balanced(runtime) => runtime.stats(),
             Self::Embedded(runtime) => runtime.stats(),
             Self::Performance(runtime) => runtime.stats(),
+        }
+    }
+
+    /// Snapshot telemetry and reset the folded per-interval counters, for periodic
+    /// export driven by a [`StatsCadence`].
+    #[inline]
+    pub fn take_stats(&mut self) -> RuntimeStats {
+        match self {
+            Self::Balanced(runtime) => runtime.take_stats(),
+            Self::Embedded(runtime) => runtime.take_stats(),
+            Self::Performance(runtime) => runtime.take_stats(),
         }
     }
 

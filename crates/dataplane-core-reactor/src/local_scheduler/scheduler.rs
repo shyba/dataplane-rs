@@ -524,6 +524,13 @@ impl<Op, const STACK_BYTES: usize, Focus: FocusPolicy, Push: PushPolicy>
         self.stats = SchedulerStats::default();
     }
 
+    /// Snapshot the counters and reset them in one step: returns the telemetry
+    /// accumulated since the last `take_stats`, ready for periodic export.
+    #[inline(always)]
+    pub fn take_stats(&mut self) -> SchedulerStats {
+        core::mem::take(&mut self.stats)
+    }
+
     fn accept_or_deflect(&mut self, task: TaskCell<Op, STACK_BYTES>, report: &mut TickReport) {
         let mut task = match self.try_insert_local(task) {
             Ok(_) => return,

@@ -70,6 +70,66 @@ impl RuntimeStats {
             BalancedHostAction::Idle => self.idle_ticks = self.idle_ticks.saturating_add(1),
         }
     }
+
+    /// Field-wise saturating add of another snapshot into this one. Summing the live
+    /// gauges across shards yields cluster totals (total alive tasks, total clock
+    /// regressions, total dropped tasks).
+    #[inline]
+    pub fn merge(&mut self, other: &RuntimeStats) {
+        self.ticks = self.ticks.saturating_add(other.ticks);
+        self.events = self.events.saturating_add(other.events);
+        self.tasks_run = self.tasks_run.saturating_add(other.tasks_run);
+        self.continue_ticks = self.continue_ticks.saturating_add(other.continue_ticks);
+        self.wait_ticks = self.wait_ticks.saturating_add(other.wait_ticks);
+        self.idle_ticks = self.idle_ticks.saturating_add(other.idle_ticks);
+        self.active_tasks = self.active_tasks.saturating_add(other.active_tasks);
+        self.now_regressions = self.now_regressions.saturating_add(other.now_regressions);
+        self.tasks_dropped = self.tasks_dropped.saturating_add(other.tasks_dropped);
+    }
+
+    /// Sum per-shard snapshots into one cluster-wide snapshot.
+    #[inline]
+    pub fn aggregate(snapshots: &[RuntimeStats]) -> RuntimeStats {
+        let mut acc = RuntimeStats::default();
+        for snapshot in snapshots {
+            acc.merge(snapshot);
+        }
+        acc
+    }
+}
+
+/// Time-gated trigger for periodic stats export, driven by the same monotonic `now_ns`
+/// the runtime already threads through `tick`. Pure and allocation-free: call
+/// [`due`](StatsCadence::due) each tick and export (e.g. via `take_stats`) when it
+/// returns `true`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StatsCadence {
+    interval_ns: u64,
+    last_export_ns: Option<u64>,
+}
+
+impl StatsCadence {
+    #[inline]
+    pub const fn new(interval_ns: u64) -> Self {
+        Self {
+            interval_ns,
+            last_export_ns: None,
+        }
+    }
+
+    /// Returns `true` when at least `interval_ns` has elapsed since the last export
+    /// (or on the first call), and records `now_ns` as the new export point. A `now_ns`
+    /// that regresses below the last export point does not trigger.
+    #[inline]
+    pub fn due(&mut self, now_ns: u64) -> bool {
+        match self.last_export_ns {
+            Some(last) if now_ns.saturating_sub(last) < self.interval_ns => false,
+            _ => {
+                self.last_export_ns = Some(now_ns);
+                true
+            }
+        }
+    }
 }
 
 impl<TimerStore, ParkStore> BalancedHostLoopAdapter<TimerStore, ParkStore>
@@ -313,5 +373,59 @@ where
             completions,
             tasks,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RuntimeStats, StatsCadence};
+
+    #[test]
+    fn cadence_triggers_on_first_call_and_after_each_interval() {
+        let mut cadence = StatsCadence::new(100);
+        assert!(cadence.due(0), "first call always due");
+        assert!(!cadence.due(50));
+        assert!(!cadence.due(99));
+        assert!(cadence.due(100), "interval elapsed");
+        assert!(!cadence.due(150));
+        assert!(cadence.due(200));
+        // A regressing clock does not trigger.
+        assert!(!cadence.due(150));
+    }
+
+    #[test]
+    fn aggregate_sums_folded_counters_and_gauges_across_shards() {
+        let a = RuntimeStats {
+            ticks: 3,
+            events: 10,
+            tasks_run: 4,
+            continue_ticks: 2,
+            wait_ticks: 1,
+            idle_ticks: 0,
+            active_tasks: 5,
+            now_regressions: 1,
+            tasks_dropped: 2,
+        };
+        let b = RuntimeStats {
+            ticks: 7,
+            events: 20,
+            tasks_run: 6,
+            continue_ticks: 5,
+            wait_ticks: 0,
+            idle_ticks: 2,
+            active_tasks: 3,
+            now_regressions: 0,
+            tasks_dropped: 1,
+        };
+
+        let total = RuntimeStats::aggregate(&[a, b]);
+        assert_eq!(total.ticks, 10);
+        assert_eq!(total.events, 30);
+        assert_eq!(total.tasks_run, 10);
+        assert_eq!(total.continue_ticks, 7);
+        assert_eq!(total.idle_ticks, 2);
+        assert_eq!(total.active_tasks, 8);
+        assert_eq!(total.tasks_dropped, 3);
+        assert_eq!(RuntimeStats::aggregate(&[]), RuntimeStats::default());
     }
 }

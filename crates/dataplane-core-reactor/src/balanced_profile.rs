@@ -12,6 +12,7 @@ pub use controller::{
 };
 pub use host_adapter::{
     BalancedCompletionTick, BalancedHostLoopAdapter, BalancedHostLoopTick, RuntimeStats,
+    StatsCadence,
 };
 pub use layout::{
     BalancedProfileBudgets, BalancedProfileError, BalancedProfileLayout, BalancedShardRole,

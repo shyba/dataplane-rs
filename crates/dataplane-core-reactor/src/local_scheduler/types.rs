@@ -193,4 +193,29 @@ impl SchedulerStats {
         }
         self.busy_ns as f64 / total as f64
     }
+
+    /// Field-wise saturating add of another snapshot into this one.
+    #[inline]
+    pub fn merge(&mut self, other: &SchedulerStats) {
+        self.ticks = self.ticks.saturating_add(other.ticks);
+        self.local_executed = self.local_executed.saturating_add(other.local_executed);
+        self.ingress_drained = self.ingress_drained.saturating_add(other.ingress_drained);
+        self.bus_drained = self.bus_drained.saturating_add(other.bus_drained);
+        self.offloaded = self.offloaded.saturating_add(other.offloaded);
+        self.bus_deferred = self.bus_deferred.saturating_add(other.bus_deferred);
+        self.bus_rejected = self.bus_rejected.saturating_add(other.bus_rejected);
+        self.dropped = self.dropped.saturating_add(other.dropped);
+        self.busy_ns = self.busy_ns.saturating_add(other.busy_ns);
+        self.idle_ns = self.idle_ns.saturating_add(other.idle_ns);
+    }
+
+    /// Sum per-shard snapshots into one cluster-wide snapshot.
+    #[inline]
+    pub fn aggregate(snapshots: &[SchedulerStats]) -> SchedulerStats {
+        let mut acc = SchedulerStats::default();
+        for snapshot in snapshots {
+            acc.merge(snapshot);
+        }
+        acc
+    }
 }

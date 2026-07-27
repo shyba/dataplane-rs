@@ -158,6 +158,17 @@ where
         snap.tasks_dropped = self.host.tasks().children_dropped();
         snap
     }
+
+    /// Snapshot the telemetry and reset the folded per-interval counters. The live
+    /// gauges (`active_tasks`, `now_regressions`, `tasks_dropped`) are read from their
+    /// sources and remain absolute across takes; the folded counters restart at zero,
+    /// so successive takes yield per-interval deltas for periodic export.
+    #[inline]
+    pub fn take_stats(&mut self) -> RuntimeStats {
+        let snap = self.stats();
+        self.stats = RuntimeStats::default();
+        snap
+    }
 }
 
 impl<D, T, P> BalancedRuntime<D, T, P, EmbeddedTimerStore, EmbeddedParkStore>

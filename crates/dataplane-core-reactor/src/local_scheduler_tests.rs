@@ -136,6 +136,39 @@ fn stats_accumulate_across_ticks_and_reset_clears_them() {
 }
 
 #[test]
+fn take_stats_returns_delta_and_resets() {
+    let placements = sample_placements();
+    let mesh = build_shard_mesh::<TaskCell<u64, 256>>(4, 8).remove(0);
+    let (bus_tx, bus_rx) = kanal::bounded::<TaskCell<u64, 256>>(1024);
+    let bus_rx = Arc::new(bus_rx);
+    let mut s = LocalMeshScheduler::<u64, 256>::new(
+        placements[0],
+        &placements,
+        mesh,
+        bus_tx,
+        bus_rx,
+        ShardSchedulerConfig::default(),
+    );
+
+    let _ = s.submit_work(TaskMeta::local(TaskPriority::Normal), 7);
+    let _ = s.tick(|_| WorkDisposition::AllDone);
+
+    let first = s.take_stats();
+    assert_eq!(first.ticks, 1);
+    assert_eq!(first.local_executed, 1);
+    assert_eq!(s.stats(), SchedulerStats::default(), "take resets counters");
+
+    let _ = s.tick(|_| WorkDisposition::AllDone);
+    let second = s.take_stats();
+    assert_eq!(second.ticks, 1, "delta since previous take, not cumulative");
+    assert_eq!(second.local_executed, 0);
+
+    let combined = SchedulerStats::aggregate(&[first, second]);
+    assert_eq!(combined.ticks, 2);
+    assert_eq!(combined.local_executed, 1);
+}
+
+#[test]
 fn mesh_zero_spill_reports_full_when_ring_is_full() {
     let mut mesh = build_shard_mesh::<u64>(2, 1);
     assert_eq!(mesh[0].try_push_admit(1, 10), Ok(()));
