@@ -1,5 +1,6 @@
 pub use dataplane_core_reactor::balanced_profile::{
     BalancedHostPolicy, BalancedProfileLayout, BalancedRecordingHostPolicy, BalancedRuntime,
+    RuntimeStats,
 };
 use dataplane_core_reactor::balanced_profile::{
     EmbeddedParkStore, EmbeddedTimerStore, PerformanceParkStore, PerformanceTimerStore,
@@ -89,6 +90,16 @@ where
             Self::Balanced(runtime) => runtime.host().active_tasks(),
             Self::Embedded(runtime) => runtime.host().active_tasks(),
             Self::Performance(runtime) => runtime.host().active_tasks(),
+        }
+    }
+
+    /// Cumulative tick telemetry with live gauges, folded across the runtime's ticks.
+    #[inline]
+    pub fn stats(&self) -> RuntimeStats {
+        match self {
+            Self::Balanced(runtime) => runtime.stats(),
+            Self::Embedded(runtime) => runtime.stats(),
+            Self::Performance(runtime) => runtime.stats(),
         }
     }
 

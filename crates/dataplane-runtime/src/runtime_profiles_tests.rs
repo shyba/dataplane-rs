@@ -258,6 +258,32 @@ fn embedded_runtime_loop_handle_has_work_reflects_task_admission_and_drain() {
 }
 
 #[test]
+fn profiled_runtime_stats_fold_across_ticks_and_capture_gauges() {
+    let mut runtime = RuntimeLoopHandle::new(build_embedded_runtime::<DummyDriver, CountTask>(
+        DummyDriver::default(),
+        4,
+    ));
+
+    let initial = runtime.inner.stats();
+    assert_eq!(initial.ticks, 0);
+    assert_eq!(initial.tasks_run, 0);
+
+    runtime
+        .try_spawn(CountTask { remaining: 2 })
+        .expect("spawn bounded embedded task");
+
+    let _ = runtime.inner.tick(1, 1, 1, |_| {}).expect("tick 1");
+    let _ = runtime.inner.tick(2, 1, 1, |_| {}).expect("tick 2");
+
+    let snap = runtime.inner.stats();
+    assert_eq!(snap.ticks, 2);
+    assert_eq!(snap.tasks_run, 2);
+    assert_eq!(snap.continue_ticks, 2);
+    assert_eq!(snap.active_tasks, 0);
+    assert_eq!(snap.tasks_dropped, 0);
+}
+
+#[test]
 fn embedded_runtime_loop_handle_try_spawn_surfaces_capacity_error() {
     let mut runtime = RuntimeLoopHandle::new(build_embedded_runtime::<DummyDriver, CountTask>(
         DummyDriver::default(),

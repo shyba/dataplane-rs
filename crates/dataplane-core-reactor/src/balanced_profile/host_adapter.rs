@@ -27,6 +27,51 @@ pub struct BalancedCompletionTick {
     pub tasks: usize,
 }
 
+/// Cumulative telemetry for the balanced-profile production tick path.
+///
+/// The folded counters (`ticks`, `events`, `tasks_run`, and the host-action buckets)
+/// are advanced on every controller-driven tick; the trailing fields are live gauges
+/// captured at snapshot time from the controller and task engine. Single-threaded per
+/// shard, so plain `u64`; aggregate across shards by summing the folded fields.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RuntimeStats {
+    pub ticks: u64,
+    pub events: u64,
+    pub tasks_run: u64,
+    pub continue_ticks: u64,
+    pub wait_ticks: u64,
+    pub idle_ticks: u64,
+    /// Live gauge: alive tasks at snapshot time.
+    pub active_tasks: u64,
+    /// Live gauge: cumulative non-monotonic clock observations.
+    pub now_regressions: u64,
+    /// Live gauge: cumulative tasks dropped under spawn-slot/queue saturation.
+    pub tasks_dropped: u64,
+}
+
+impl RuntimeStats {
+    #[inline]
+    pub(crate) fn fold_tick(
+        &mut self,
+        step: &BalancedControllerStep,
+        events: usize,
+        tasks: usize,
+    ) {
+        self.ticks = self.ticks.saturating_add(1);
+        self.events = self.events.saturating_add(events as u64);
+        self.tasks_run = self.tasks_run.saturating_add(tasks as u64);
+        match step.host_action {
+            BalancedHostAction::Continue => {
+                self.continue_ticks = self.continue_ticks.saturating_add(1)
+            }
+            BalancedHostAction::WaitUntil { .. } => {
+                self.wait_ticks = self.wait_ticks.saturating_add(1)
+            }
+            BalancedHostAction::Idle => self.idle_ticks = self.idle_ticks.saturating_add(1),
+        }
+    }
+}
+
 impl<TimerStore, ParkStore> BalancedHostLoopAdapter<TimerStore, ParkStore>
 where
     TimerStore: TimerStoreOps,

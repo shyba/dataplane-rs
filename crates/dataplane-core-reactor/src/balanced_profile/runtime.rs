@@ -1,5 +1,7 @@
 use super::controller::EmbeddedResourceError;
-use super::host_adapter::{BalancedCompletionTick, BalancedHostLoopAdapter, BalancedHostLoopTick};
+use super::host_adapter::{
+    BalancedCompletionTick, BalancedHostLoopAdapter, BalancedHostLoopTick, RuntimeStats,
+};
 use super::park::{
     BalancedParkLease, BalancedParkSlots, BalancedWakeToken, EmbeddedParkStore, ParkStoreOps,
 };
@@ -30,6 +32,7 @@ pub struct BalancedRuntime<
     host: HostLoop<D, T>,
     adapter: BalancedHostLoopAdapter<TimerStore, ParkStore>,
     policy: P,
+    stats: RuntimeStats,
 }
 
 impl<D, T, P, TimerStore, ParkStore> BalancedRuntime<D, T, P, TimerStore, ParkStore>
@@ -52,6 +55,7 @@ where
             layout,
             host,
             policy,
+            stats: RuntimeStats::default(),
         }
     }
 
@@ -130,14 +134,29 @@ where
     where
         F: FnMut(D::Event),
     {
-        self.adapter.tick_with_policy(
+        let tick = self.adapter.tick_with_policy(
             &mut self.host,
             now_ns,
             max_events,
             task_budget,
             on_event,
             &mut self.policy,
-        )
+        )?;
+        self.stats
+            .fold_tick(&tick.controller_step, tick.events, tick.tasks);
+        Ok(tick)
+    }
+
+    /// Cumulative telemetry for this runtime's controller-driven ticks, with live
+    /// gauges (active tasks, clock regressions, dropped tasks) captured now. Cheap
+    /// struct copy; aggregate across shard runtimes by summing snapshots.
+    #[inline]
+    pub fn stats(&self) -> RuntimeStats {
+        let mut snap = self.stats;
+        snap.active_tasks = self.host.active_tasks() as u64;
+        snap.now_regressions = self.adapter.controller().now_regressions();
+        snap.tasks_dropped = self.host.tasks().children_dropped();
+        snap
     }
 }
 
@@ -204,7 +223,7 @@ where
     where
         F: FnMut(D::Event),
     {
-        self.adapter.tick_or_wait_with_policy(
+        let tick = self.adapter.tick_or_wait_with_policy(
             &mut self.host,
             now_ns,
             max_events,
@@ -212,7 +231,10 @@ where
             task_budget,
             on_event,
             &mut self.policy,
-        )
+        )?;
+        self.stats
+            .fold_tick(&tick.controller_step, tick.events, tick.tasks);
+        Ok(tick)
     }
 }
 
@@ -242,13 +264,16 @@ where
         min_events: usize,
         task_budget: usize,
     ) -> Result<BalancedCompletionTick, <D as ReactorDriver>::Error> {
-        self.adapter.tick_completions_or_wait_with_policy(
+        let tick = self.adapter.tick_completions_or_wait_with_policy(
             &mut self.host,
             now_ns,
             max_events,
             min_events,
             task_budget,
             &mut self.policy,
-        )
+        )?;
+        self.stats
+            .fold_tick(&tick.controller_step, tick.completions.len(), tick.tasks);
+        Ok(tick)
     }
 }

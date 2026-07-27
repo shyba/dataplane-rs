@@ -10,7 +10,9 @@ pub use controller::{
     BalancedController, BalancedControllerPhase, BalancedControllerStep, BalancedHostAction,
     EmbeddedResourceError,
 };
-pub use host_adapter::{BalancedCompletionTick, BalancedHostLoopAdapter, BalancedHostLoopTick};
+pub use host_adapter::{
+    BalancedCompletionTick, BalancedHostLoopAdapter, BalancedHostLoopTick, RuntimeStats,
+};
 pub use layout::{
     BalancedProfileBudgets, BalancedProfileError, BalancedProfileLayout, BalancedShardRole,
     EmbeddedProfileLayout, EmbeddedProfilePolicy, PerformanceProfileLayout,
