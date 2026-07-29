@@ -238,7 +238,19 @@ where
         Ok(task_ref)
     }
 
+    /// Spawn a task, panicking if the engine is at capacity.
+    ///
+    /// This is an ergonomic wrapper for contexts where capacity is statically known
+    /// (tests, fixed-size setup). Production paths that can hit admission saturation
+    /// must call [`try_spawn`](Self::try_spawn) and handle
+    /// [`NativeTaskCapacityError`] instead — saturation is normal backpressure, not a
+    /// fatal condition.
+    ///
+    /// # Panics
+    /// Panics if all task slots are occupied. `#[track_caller]` attributes the panic
+    /// to the caller.
     #[inline(always)]
+    #[track_caller]
     pub fn spawn(&mut self, task: T) -> TaskRef {
         match self.try_spawn(task) {
             Ok(task_ref) => task_ref,
@@ -757,6 +769,26 @@ mod tests {
         assert_eq!(progressed, 4);
         assert_eq!(engine.active_tasks(), 0);
         assert_eq!(engine.ready_len(), 0);
+    }
+
+    #[test]
+    fn try_spawn_returns_capacity_error_at_saturation() {
+        let mut engine = NativeTaskEngine::with_task_capacity_limit(1, 1);
+        assert!(engine.try_spawn(CounterTask { remaining: 1 }).is_ok());
+
+        let err = engine
+            .try_spawn(CounterTask { remaining: 1 })
+            .expect_err("second spawn must be rejected");
+        assert_eq!(err.active(), 1);
+        assert_eq!(err.max_slots(), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "native task capacity exceeded")]
+    fn spawn_panics_at_saturation() {
+        let mut engine = NativeTaskEngine::with_task_capacity_limit(1, 1);
+        engine.spawn(CounterTask { remaining: 1 });
+        engine.spawn(CounterTask { remaining: 1 });
     }
 
     #[test]

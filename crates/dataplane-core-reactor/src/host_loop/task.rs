@@ -52,7 +52,14 @@ where
         &mut self.tasks
     }
 
+    /// Spawn a task, panicking if the engine is at capacity. See
+    /// [`NativeTaskEngine::spawn`](crate::native_task::NativeTaskEngine::spawn):
+    /// use [`try_spawn`](Self::try_spawn) on any path that can hit saturation.
+    ///
+    /// # Panics
+    /// Panics if all task slots are occupied.
     #[inline(always)]
+    #[track_caller]
     pub fn spawn(&mut self, task: T) -> TaskRef {
         self.tasks.spawn(task)
     }
