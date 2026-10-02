@@ -19,14 +19,16 @@ where
     ///
     /// Progress semantics:
     /// - `tick.tasks > 0` means one or more native tasks advanced during this step.
-    /// - `tick.completions > 0` means one or more driver completions were observed.
+    /// - `!tick.completions.is_empty()` means driver completions were observed.
     /// - A step may report both task and completion progress.
-    /// - A step may report no progress (`tasks == 0 && completions == 0`); callers
-    ///   decide whether to idle, wait, or immediately run another step.
+    /// - A step may report no progress (`tasks == 0 && completions.is_empty()`); callers
+    ///   decide whether to idle or immediately run another step after it returns.
     ///
-    /// This API is host-neutral and non-blocking by default from runtime policy:
-    /// it executes exactly one bounded tick and returns the observed progress.
-    /// Any multi-step retry, backoff, or sleep policy remains caller-owned.
+    /// Executes one tick. `min_events` is forwarded to the driver's wait path;
+    /// zero is the default, but non-blocking behavior requires a driver that
+    /// honors it without blocking. Execution
+    /// budgets bound work counts, not the duration of task or driver callbacks.
+    /// Multi-step retry and idle policy remain caller-owned.
     ///
     /// Current driver-shape constraint:
     /// this method is only available when `D` uses
@@ -120,6 +122,10 @@ where
     ///     fn wait(&mut self, _min_events: usize) -> Result<usize, Self::Error> {
     ///         Ok(0)
     ///     }
+    ///     fn wait_deadline(&mut self, min_events: usize, _timeout_ns: Option<u64>) -> Result<usize, Self::Error> {
+    ///         self.wait(min_events)
+    ///     }
+    ///
     /// }
     ///
     /// struct OneStepTask;
@@ -171,13 +177,13 @@ where
     #[inline]
     /// Drive repeated bounded runtime steps while work remains and steps are available.
     ///
-    /// By default this is non-blocking from the runtime side:
-    /// each iteration runs one bounded step and returns as soon as either:
+    /// Driver wait behavior follows [`Self::step`], including when `min_events`
+    /// is zero. Each iteration runs one step and returns as soon as either:
     /// - no work remains, or
     /// - `step_limit` is reached.
     ///
-    /// The runtime never sleeps in this helper; any wait/backoff is host-owned via
-    /// [`EmbeddedHostAdapter::on_idle`].
+    /// A tick can invoke the driver wait path through [`Self::step`].
+    /// Additional idle/backoff policy is host-owned via [`EmbeddedHostAdapter::on_idle`].
     ///
     /// # Example
     ///
@@ -243,6 +249,10 @@ where
     ///     fn wait(&mut self, _min_events: usize) -> Result<usize, Self::Error> {
     ///         Ok(0)
     ///     }
+    ///     fn wait_deadline(&mut self, min_events: usize, _timeout_ns: Option<u64>) -> Result<usize, Self::Error> {
+    ///         self.wait(min_events)
+    ///     }
+    ///
     /// }
     ///
     /// struct TwoStepTask {
@@ -318,9 +328,9 @@ where
     }
 
     #[inline]
-    /// Drive using [`EmbeddedHostLoopConfig::drive`] defaults.
+    /// Drive using [`super::EmbeddedHostLoopConfig::drive`] defaults.
     ///
-    /// This preserves the same host-neutral, non-blocking semantics as
+    /// This preserves the same host-neutral, driver-dependent wait semantics as
     /// [`Self::drive_steps_with_host`].
     pub fn drive_steps_with_config_defaults<H>(
         &mut self,

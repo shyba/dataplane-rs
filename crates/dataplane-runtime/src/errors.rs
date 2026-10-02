@@ -67,6 +67,8 @@ fn errno_to_atom(errno: i32) -> &'static str {
         libc::ENETUNREACH => "enetunreach",
         libc::ENETDOWN => "enetdown",
         libc::EACCES => "eacces",
+        libc::EPERM => "eperm",
+        libc::EOPNOTSUPP => "enotsup",
         libc::ENOENT => "enoent",
         libc::ENOSPC => "enospc",
         libc::ECANCELED => "ecanceled",

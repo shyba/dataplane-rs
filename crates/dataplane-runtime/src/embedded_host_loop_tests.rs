@@ -76,6 +76,8 @@ impl ReactorDriverWait for DummyDriver {
     fn wait(&mut self, _min_events: usize) -> Result<usize, Self::Error> {
         Ok(0)
     }
+    fn wait_deadline(&mut self, min_events: usize, _timeout_ns: Option<u64>) -> Result<usize, Self::Error> { self.wait(min_events) }
+
 }
 
 impl ReactorDriver for NonNetworkDummyDriver {
@@ -176,6 +178,8 @@ impl ReactorDriverWait for FakeCompletionDriver {
     fn wait(&mut self, _min_events: usize) -> Result<usize, Self::Error> {
         Ok(0)
     }
+    fn wait_deadline(&mut self, min_events: usize, _timeout_ns: Option<u64>) -> Result<usize, Self::Error> { self.wait(min_events) }
+
 }
 
 impl NativeTask for CountTask {
@@ -269,6 +273,18 @@ fn embedded_host_loop_fake_driver_submits_and_drains_one_completion_through_step
     assert_eq!(tick.tasks, 0);
     assert_eq!(tick.completions.len(), 1);
     assert_eq!(tick.completions[0].token, submitted);
+    assert!(!host_loop.has_work());
+}
+
+#[test]
+fn zero_capacity_host_loop_rejects_admission() {
+    let mut host_loop = EmbeddedHostLoop::<DummyDriver, CountTask>::new(
+        DummyDriver,
+        EmbeddedHostLoopConfig { task_capacity: 0, ..Default::default() },
+    );
+    let error = host_loop.try_spawn(CountTask { remaining: 3 }).unwrap_err();
+    assert_eq!(error.max_slots(), 0);
+    assert_eq!(error.into_task().remaining, 3);
     assert!(!host_loop.has_work());
 }
 

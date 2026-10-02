@@ -21,9 +21,9 @@ pub trait EmbeddedHostAdapter {
     /// one wait model into every target, including cooperative host loops that
     /// must stay responsive to other device work.
     ///
-    /// The default implementation is a no-op, so drive calls remain non-blocking
-    /// unless a host intentionally adds wait/backoff behavior. Targets that need
-    /// sleep, yield, or low-power idle can still do so here as explicit host policy.
+    /// The default implementation is a no-op and adds no blocking of its own.
+    /// Driver waits and task callbacks still determine whether a drive call can
+    /// block. Hosts may add sleep, yield, or low-power idle here as explicit policy.
     ///
     /// # Example
     ///

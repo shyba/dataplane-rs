@@ -1,73 +1,12 @@
-//! ESP32 integration slot for the `esp32-integration` feature gate.
+//! Feature-gated ESP32 clock conversion, without a HAL binding.
 //!
-//! This module is intentionally a safe placeholder only.
-//! The feature gate reserves an integration seam for future ESP32 wiring but
-//! is not an ESP32 HAL binding at this stage.
-//! No HAL crates, peripheral handles, target-specific APIs, or unsafe blocks
-//! are introduced here until a concrete integration task is approved.
-//! In particular, keep this module free of imports from `esp-hal`, `embassy`,
-//! `embedded-hal`, and `esp-idf-hal` until a single first target crate is
-//! selected and tracked by a dedicated integration story.
-//! Integration decision (DP-EMB-0181):
-//! - first lane is the local trait placeholder path (this module +
-//!   `EmbeddedHostAdapter` seam), not direct `esp-hal` or `embassy` binding
-//! - defer choosing one concrete HAL/runtime crate until the adapter contract,
-//!   timer source requirements, and interrupt/wake semantics are documented and
-//!   validated under the feature gate
-//! - keep any required unsafe invariants outside this crate until that concrete
-//!   integration point exists
-//! M12C dependency-introduction guard:
-//! - dependency additions in this lane are compile-time wiring only and must
-//!   not change runtime host-loop behavior, scheduler policy, or I/O semantics
-//! M12D runtime-core modification guard:
-//! - keep ESP32 adapter implementation scoped to this feature-gated
-//!   `dataplane-runtime` module and `EmbeddedHostAdapter` wiring only
-//! - do not directly modify `dataplane-core-reactor` scheduler, host-loop, or
-//!   ingress/task primitives while implementing this adapter lane
-//! Any target-specific `unsafe` required by HAL call sites is out of scope
-//! for this placeholder and may only be introduced at a concrete HAL
-//! integration point.
-//! Required unsafe-callsite documentation contract for that future HAL step:
-//! - each `unsafe` call site must carry a short `SAFETY:` note at the point of
-//!   use that states the exact HAL preconditions being relied on
-//! - each call site must name the owned resource boundary
-//!   (clock register block, interrupt source, wake token, or descriptor/handle)
-//!   and why aliasing/lifetime rules remain valid
-//! - each call site must state bounded-failure behavior
-//!   (what happens if the HAL read/write fails or data is stale) and confirm no
-//!   hidden unbounded retry/queue growth is introduced
-//! - each call site must be adapter-local under `esp32-integration`; do not
-//!   widen runtime-core traits or cross-crate ownership boundaries to carry
-//!   target-specific unsafe assumptions
-//! - this module currently forbids `unsafe` entirely (`#![forbid(unsafe_code)]`);
-//!   these rules are predeclared documentation for the follow-up HAL packet
-//! M9J guard:
-//! - do not add ESP32 I/O operation surface area (socket, driver submit/poll,
-//!   peripheral I/O traits, or async I/O wrappers) before the host-loop
-//!   skeleton and driver trait boundary are proven stable by concrete callers.
-//! Deferred follow-up task for later HAL-backed driver prototype:
-//! - after a concrete embedded caller proves the current trait boundary is the
-//!   next blocker, add a dedicated integration story to prototype one
-//!   HAL-backed `ReactorDriver<NetEvent, OpToken> + ReactorDriverWait`
-//!   implementation behind `esp32-integration`
-//! - keep that prototype compile-gated, safe-Rust-first, and adapter-local;
-//!   do not widen generic runtime traits during the first prototype step
-//! - capture exact HAL/toolchain command(s), observed stderr signatures, and
-//!   the smallest next unblocking step before any runtime-core changes
-//! Deferred follow-up task for ESP32-specific example coverage:
-//! - after the first concrete HAL integration lane is selected and compiled
-//!   under `esp32-integration`, add one minimal rustdoc example in this module
-//!   showing adapter-local `now_ns` wiring from the chosen monotonic source
-//! - keep the example target-neutral at the runtime boundary (plain `u64`
-//!   nanoseconds into `EmbeddedHostAdapter`) and avoid widening runtime traits
-//! - include the exact feature-gated validation command used for the example
-//!   when updating the execution ledger
+//! Callers sample a monotonic SYSTIMER counter and feed it to [`Esp32ClockAdapter`].
+//! The adapter exposes elapsed nanoseconds through [`EmbeddedHostAdapter`]. It
+//! neither reads hardware nor owns interrupts, sleeps, or allocates per sample.
+//! Counter wrap/reset is rejected as a backward sample; callers must extend a
+//! wrapping hardware counter before passing ticks here.
 //!
-//! Compile-check sentinel:
-//! - when `RUSTFLAGS="--cfg dataplane_verify_default_excludes_esp32"` is set,
-//!   this module emits a compile error if it is compiled at all
-//! - this allows a focused default-feature `cargo check` to prove the
-//!   `esp32-integration` gate excludes ESP32 module code by default
+//! This host-runtime integration seam is not a bare-metal ESP32 runtime.
 #![cfg(feature = "esp32-integration")]
 #![forbid(unsafe_code)]
 
@@ -93,85 +32,7 @@ impl Esp32IntegrationPlaceholder {
     }
 }
 
-/// Placeholder clock adapter slot for future ESP32 host-time wiring.
-///
-/// This type exists only behind `esp32-integration` to reserve the runtime-facing
-/// adapter seam. It intentionally carries no HAL imports or peripheral state.
-///
-/// Expected monotonic nanosecond semantics for the eventual adapter wiring:
-/// - return a non-decreasing `u64` nanosecond timestamp on every `now_ns` read
-/// - use a monotonic elapsed-time source (not wall-clock or timezone time)
-/// - keep raw HAL counter reads and tick-to-nanosecond conversion inside the
-///   adapter edge, then pass only plain `u64` nanoseconds into runtime APIs
-/// - if conversion or accumulation reaches numeric limits, clamp with saturating
-///   arithmetic so reported values do not move backward
-///
-/// Required timer-source contract for the selected first integration lane
-/// (local trait placeholder + `EmbeddedHostAdapter` seam):
-/// - select one primary monotonic hardware counter for `now_ns` and keep that
-///   selection adapter-local behind `esp32-integration`
-/// - current required direction for first bring-up: use the `SYSTIMER` counter
-///   path as primary, with timer-group counters only as optional fallback if
-///   deterministic preference order is documented
-/// - record counter frequency assumptions and the exact tick-to-nanosecond
-///   conversion formula used by `now_ns`
-/// - record wraparound handling rules that preserve non-decreasing `u64` output
-/// - if fallback is kept, record deterministic source preference so behavior is
-///   stable across builds and boot modes
-///
-/// Required interrupt/wake semantics for the same selected first lane:
-/// - keep wake signaling adapter-local under `esp32-integration`; runtime-core
-///   boundaries continue to observe only host-loop progress (`step_with_host`,
-///   `drive_steps_with_host`) and plain `u64` time from `now_ns`
-/// - represent interrupts as edge notifications that request another bounded
-///   host-loop step instead of introducing a blocking wait contract in runtime
-/// - if multiple interrupt sources can fire for one wake epoch, coalesce to a
-///   single pending wake signal so host progress remains bounded and deterministic
-/// - define and document clear ack/clear ordering for wake sources so each
-///   interrupt causes at least one subsequent host-loop step without duplicate
-///   mandatory work
-/// - if no interrupt arrives, caller policy may still drive periodic bounded
-///   steps via `on_idle`; no mandatory sleep/wait behavior is added to runtime
-///
-/// Required allocation policy for the same selected first lane:
-/// - keep this placeholder lane allocation-neutral at runtime boundaries:
-///   no allocation exceptions, no allocator hooks, and no runtime-core API
-///   widening for target-specific allocation behavior
-/// - require adapter-local wake/time bookkeeping to use bounded state only;
-///   do not depend on per-step heap growth in `now_ns`, wake signaling, or
-///   host-loop drive paths
-/// - if adapter state is needed, provision it once during setup and keep
-///   step-time behavior deterministic under fixed capacity
-/// - if capacity is exceeded, use explicit bounded behavior
-///   (drop/coalesce/fail-fast with recorded reason) rather than hidden
-///   retries or unbounded queues
-/// - keep allocation-policy decisions behind `esp32-integration` until one
-///   concrete HAL/runtime crate is selected and validated
-///
-/// Required minimum target triple and toolchain expectations for the same
-/// selected first lane:
-/// - use `xtensa-esp32-none-elf` as the minimum target triple for ESP32
-///   feature-path compile checks in this lane
-/// - require an ESP32-capable Rust toolchain + target sysroot able to build
-///   `core` for `xtensa-esp32-none-elf` before treating target compile checks
-///   as blocking gates
-/// - keep default host builds/tests target-neutral; when local ESP32 toolchain
-///   support is unavailable, record the exact attempted command, stderr
-///   signature, and next unblocking step in the active execution ledger before
-///   introducing runtime-core changes
-///
-/// Compile documentation for hosts without ESP32 toolchain support:
-/// - preferred target compile-only check (when toolchain support exists):
-///   `cargo check -p dataplane-runtime --features esp32-integration --target xtensa-esp32-none-elf --lib`
-/// - expected unsupported-toolchain signatures include:
-///   `can't find crate for 'core'`, `target may not be installed`,
-///   `is not a recognized processor`, and cross-compilation `pkg-config`
-///   setup failures
-/// - if unsupported locally, run host fallback compile-only check instead:
-///   `cargo check -p dataplane-runtime --features esp32-integration --lib`
-/// - convenience wrapper for this policy:
-///   `tools/check_esp32_feature_gate_compile.sh`
-/// First selected monotonic source for the ESP32 feature-gated adapter lane.
+/// Monotonic source identifier for the feature-gated clock adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Esp32ClockSource {
     /// ESP32 system timer counter (`SYSTIMER`) ticks.
@@ -187,10 +48,17 @@ pub enum Esp32ClockAdapterError {
     CounterMovedBackward { last_tick: u64, observed_tick: u64 },
 }
 
+/// Allocation-free elapsed-time conversion for caller-sampled SYSTIMER ticks.
+///
+/// Output starts at zero, saturates at `u64::MAX`, and does not depend on sample
+/// frequency. The frequency must remain constant. Backward samples return an
+/// error without changing state; no wraparound or source fallback is inferred.
+/// Hardware handles and any unsafe HAL access remain caller-owned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Esp32ClockAdapter {
     source: Esp32ClockSource,
     counter_hz: u64,
+    initial_tick: u64,
     last_tick: u64,
     now_ns: u64,
 }
@@ -211,6 +79,7 @@ impl Esp32ClockAdapter {
         Ok(Self {
             source: Esp32ClockSource::Systimer,
             counter_hz,
+            initial_tick,
             last_tick: initial_tick,
             now_ns: 0,
         })
@@ -237,20 +106,19 @@ impl Esp32ClockAdapter {
             });
         }
 
-        let delta_ticks = observed_tick - self.last_tick;
+        // Convert total elapsed ticks, not each sample's delta: rounding each
+        // delta loses fractional nanoseconds and makes time depend on polling rate.
+        let elapsed_ticks = observed_tick - self.initial_tick;
         self.last_tick = observed_tick;
-        self.now_ns = self
-            .now_ns
-            .saturating_add(ticks_to_ns_saturating(delta_ticks, self.counter_hz));
+        self.now_ns = ticks_to_ns_saturating(elapsed_ticks, self.counter_hz);
         Ok(self.now_ns)
     }
 
     /// Adapter-local safe boundary for reading one SYSTIMER sample then
     /// applying monotonic conversion.
     ///
-    /// If a future HAL call requires `unsafe`, keep that `unsafe` in the
-    /// smallest private helper used by `read_tick`, and keep this safe wrapper
-    /// as the runtime-facing entry point.
+    /// `read_tick` is called exactly once. Any unsafe HAL access belongs in the
+    /// caller's hardware adapter, outside this safe-only crate.
     pub fn observe_systimer_with_read<F>(
         &mut self,
         mut read_tick: F,
@@ -263,15 +131,7 @@ impl Esp32ClockAdapter {
     }
 }
 
-/// Runtime-facing boundary for the ESP32 clock adapter remains the
-/// [`EmbeddedHostAdapter`] trait only.
-///
-/// Adapter-local helpers such as [`Self::from_systimer`] and
-/// [`Self::observe_systimer_tick`] exist to ingest raw hardware ticks, but
-/// runtime-core integration continues to consume plain monotonic `u64`
-/// nanoseconds via [`EmbeddedHostAdapter::now_ns`] without widening trait
-/// coupling in this lane. Direct runtime-core behavior edits stay out of
-/// scope for this adapter implementation packet.
+/// Returns the last observed elapsed time; this trait call does not sample hardware.
 impl EmbeddedHostAdapter for Esp32ClockAdapter {
     fn now_ns(&mut self) -> u64 {
         self.now_ns
@@ -311,6 +171,20 @@ mod tests {
             .expect("tick conversion succeeds");
         assert_eq!(now_ns, 1_000_000);
         assert_eq!(clock.now_ns(), 1_000_000);
+    }
+
+    #[test]
+    fn sampling_frequency_does_not_accumulate_rounding_error() {
+        let mut frequent = Esp32ClockAdapter::from_systimer(3, 10).unwrap();
+        let mut once = frequent;
+        for tick in 11..=13 {
+            frequent.observe_systimer_tick(tick).unwrap();
+        }
+        assert_eq!(frequent.now_ns(), 1_000_000_000);
+        assert_eq!(once.observe_systimer_tick(13).unwrap(), frequent.now_ns());
+        assert!(frequent.observe_systimer_tick(12).is_err());
+        assert_eq!(frequent.now_ns(), 1_000_000_000);
+        assert_eq!(frequent.observe_systimer_tick(16).unwrap(), 2_000_000_000);
     }
 
     #[test]

@@ -6,11 +6,15 @@
 //! The ESP32 integration module must stay absent unless the
 //! `esp32-integration` feature is enabled.
 //!
-//! ```compile_fail
-//! use dataplane_runtime::esp32::Esp32IntegrationPlaceholder;
-//!
-//! let _ = Esp32IntegrationPlaceholder::new();
-//! ```
+#![cfg_attr(
+    not(feature = "esp32-integration"),
+    doc = "
+```compile_fail
+use dataplane_runtime::esp32::Esp32IntegrationPlaceholder;
+let _ = Esp32IntegrationPlaceholder::new();
+```
+"
+)]
 
 #[cfg(all(target_os = "none", feature = "host-runtime"))]
 compile_error!("dataplane-runtime host-runtime feature is not available for target_os=none");
@@ -24,9 +28,9 @@ pub mod errors;
 #[cfg(all(feature = "esp32-integration", feature = "host-runtime"))]
 pub mod esp32;
 #[cfg(feature = "host-runtime")]
-pub mod runtime_profiles;
-#[cfg(feature = "host-runtime")]
 pub mod net_addr;
+#[cfg(feature = "host-runtime")]
+pub mod runtime_profiles;
 #[cfg(feature = "host-runtime")]
 pub mod runtime_protocol;
 #[cfg(feature = "host-runtime")]

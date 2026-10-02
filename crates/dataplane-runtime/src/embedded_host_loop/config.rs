@@ -3,7 +3,7 @@
 pub struct EmbeddedHostLoopConfig {
     /// Maximum number of native tasks that may be admitted concurrently.
     ///
-    /// This capacity is enforced by [`EmbeddedHostLoop::try_spawn`]. The value is an
+    /// This capacity is enforced by [`super::EmbeddedHostLoop::try_spawn`]. The value is an
     /// admission bound only: it is independent from per-step execution budgets in
     /// [`EmbeddedDriveConfig`] and may be set below the embedded policy task budget.
     ///

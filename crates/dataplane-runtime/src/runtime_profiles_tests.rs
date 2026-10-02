@@ -84,6 +84,8 @@ impl ReactorDriverWait for DummyDriver {
         self.outstanding = 0;
         Ok(1)
     }
+    fn wait_deadline(&mut self, min_events: usize, _timeout_ns: Option<u64>) -> Result<usize, Self::Error> { self.wait(min_events) }
+
 }
 
 impl NativeTask for CountTask {

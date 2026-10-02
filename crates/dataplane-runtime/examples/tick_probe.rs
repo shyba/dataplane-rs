@@ -71,6 +71,8 @@ impl ReactorDriverWait for ProbeDriver {
     fn wait(&mut self, _min: usize) -> Result<usize, Self::Error> {
         Ok(0)
     }
+    fn wait_deadline(&mut self, min_events: usize, _timeout_ns: Option<u64>) -> Result<usize, Self::Error> { self.wait(min_events) }
+
 }
 
 fn main() {

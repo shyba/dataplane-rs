@@ -45,9 +45,11 @@ impl SessionState {
             if (state & SESSION_API_CLOSED) != 0 {
                 return false;
             }
-            let Some(next) = state.checked_add(1) else {
+            // The high bit belongs to the closed flag, not the call count.
+            if state == SESSION_API_CLOSED - 1 {
                 return false;
-            };
+            }
+            let next = state + 1;
             if self
                 .api_state
                 .compare_exchange(state, next, Ordering::AcqRel, Ordering::Acquire)
@@ -60,7 +62,7 @@ impl SessionState {
 
     pub fn end_api_call(&self) {
         let prev = self.api_state.fetch_sub(1, Ordering::AcqRel);
-        debug_assert_eq!(prev & !SESSION_API_CLOSED, 1);
+        debug_assert_ne!(prev & !SESSION_API_CLOSED, 0, "unbalanced end_api_call");
     }
 
     pub fn mark_api_closed(&self) -> bool {
@@ -125,7 +127,6 @@ pub enum ActiveMode {
 pub enum PacketMode {
     Raw,
 }
-
 
 #[rustler::resource_impl]
 impl rustler::Resource for SocketRef {}

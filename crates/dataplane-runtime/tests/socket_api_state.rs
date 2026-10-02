@@ -62,3 +62,28 @@ fn mark_api_closed_waits_for_inflight_api_calls() {
     assert!(session.is_closed());
     worker.join().expect("worker should finish");
 }
+
+#[test]
+fn multiple_inflight_calls_can_finish_independently() {
+    let session = make_session_state();
+    assert!(session.begin_api_call());
+    assert!(session.begin_api_call());
+    session.end_api_call();
+    session.end_api_call();
+    assert!(session.mark_api_closed());
+}
+
+#[test]
+fn call_count_cannot_overflow_into_closed_flag() {
+    let session = make_session_state();
+    let max_calls = (1usize << (usize::BITS - 1)) - 1;
+    session
+        .api_state
+        .store(max_calls, std::sync::atomic::Ordering::Relaxed);
+    assert!(!session.begin_api_call());
+    assert!(!session.is_closed());
+    assert_eq!(
+        session.api_state.load(std::sync::atomic::Ordering::Relaxed),
+        max_calls
+    );
+}

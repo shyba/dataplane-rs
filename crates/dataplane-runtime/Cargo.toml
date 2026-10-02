@@ -1,4 +1,5 @@
 [package]
+license.workspace = true
 name = "dataplane-runtime"
 version = "0.1.0"
 edition = "2021"
@@ -53,6 +54,11 @@ usbd-serial = { version = "0.2", optional = true }
 criterion = "0.5"
 crossbeam-queue = "0.3"
 kanal = "0.1"
+
+[[bench]]
+name = "clock_adapter"
+harness = false
+required-features = ["esp32-integration"]
 
 [[bench]]
 name = "scheduler_hot_path"

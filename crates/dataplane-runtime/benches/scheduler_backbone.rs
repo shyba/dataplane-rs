@@ -1,14 +1,14 @@
 //! Scheduler backbone benchmark.
 //!
-//! Validates multi-scheduler mesh communication under load.
-//! Fixed for kanal-based LocalMeshScheduler::new signature.
+//! Measures scheduler setup, admission, mesh offload, draining, and teardown.
+//! Schedulers are driven sequentially; this is not a multicore scaling test.
 
 use std::sync::Arc;
 
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
 use dataplane_core_reactor::local_scheduler::{
     build_shard_mesh, LocalMeshScheduler, SchedulerPlacement, ShardSchedulerConfig, TaskCell,
-    WorkDisposition,
+    TaskMeta, TaskPriority, WorkDisposition,
 };
 
 const STACK_BYTES: usize = 256;
@@ -39,7 +39,7 @@ fn run_backbone_distributed(total_ops: usize, shard_count: usize) -> usize {
         .collect();
 
     let cfg = ShardSchedulerConfig {
-        local_queue_capacity: 2048,
+        local_queue_capacity: total_ops.max(2048),
         overload_soft_limit: 1024,
         ingress_drain_budget: 512,
         ingress_scan_budget: 8,
@@ -56,6 +56,16 @@ fn run_backbone_distributed(total_ops: usize, shard_count: usize) -> usize {
         })
         .collect();
 
+    // Concentrate ingress on one shard so overload can exercise mesh offload.
+    for op in 0..total_ops {
+        assert!(
+            schedulers[0]
+                .submit_work(TaskMeta::global(TaskPriority::Normal), op as Op)
+                .is_ok(),
+            "benchmark admission failed"
+        );
+    }
+
     let mut completed = 0usize;
     let mut rounds = 0usize;
     let max_rounds = total_ops.saturating_mul(4).max(1024);
@@ -63,11 +73,11 @@ fn run_backbone_distributed(total_ops: usize, shard_count: usize) -> usize {
     while completed < total_ops && rounds < max_rounds {
         let mut progressed = 0usize;
         for scheduler in &mut schedulers {
-            let report = scheduler.tick(|op| {
+            scheduler.tick(|op| {
                 black_box(*op);
+                progressed += 1;
                 WorkDisposition::Complete
             });
-            progressed += report.local_executed;
         }
         completed += progressed;
         if progressed == 0 {
@@ -86,7 +96,7 @@ fn run_backbone_distributed(total_ops: usize, shard_count: usize) -> usize {
 fn benchmark_scheduler_backbone(c: &mut Criterion) {
     let mut group = c.benchmark_group("scheduler_backbone");
     for shards in [1, 2, 4] {
-        group.throughput(Throughput::Elements(1));
+        group.throughput(Throughput::Elements(4096));
         group.bench_with_input(
             BenchmarkId::from_parameter(shards),
             &shards,
