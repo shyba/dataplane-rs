@@ -24,6 +24,7 @@
     accept_timeout_cleanup/1,
     concurrent_acceptors/1,
     send_recv_roundtrip/1,
+    nif_resource_registration_recv_recovery/1,
     subscribe_command_read_control/1,
     subscribe_command_accept/1,
     subscribe_command_accept_new_consumer/1,
@@ -85,6 +86,7 @@ groups() ->
         ]},
         {data_transfer, [sequence], [
             send_recv_roundtrip,
+            nif_resource_registration_recv_recovery,
             subscribe_command_read_control,
             subscribe_command_accept,
             subscribe_command_accept_new_consumer,
@@ -236,6 +238,22 @@ concurrent_acceptors(Config) ->
 %% ============================================================================
 %% Group: data_transfer
 %% ============================================================================
+
+nif_resource_registration_recv_recovery(_Config) ->
+    {ok, ListenSock} = ranch_uring:listen([{port, 0}]),
+    {ok, {_, Port}} = ranch_uring:sockname(ListenSock),
+    {ok, ClientSock} = gen_tcp:connect("localhost", Port, [binary, {active, false}]),
+    {ok, ServerSock} = ranch_uring:accept(ListenSock, 2000),
+    %% Direct NIF calls exercise Rustler resource registration and lifetime while
+    %% a timed-out receive is followed by a successful receive on the same handle.
+    ?assertEqual({error, timeout}, ranch_uring_nif:recv(ServerSock, 0, 100)),
+    Payload = <<"nif-resource-recovery">>,
+    ok = gen_tcp:send(ClientSock, Payload),
+    ?assertEqual({ok, Payload}, ranch_uring_nif:recv(ServerSock, byte_size(Payload), 2000)),
+    ok = ranch_uring_nif:close(ServerSock),
+    ranch_uring:close(ListenSock),
+    gen_tcp:close(ClientSock).
+
 
 send_recv_roundtrip(Config) ->
     Port = proplists:get_value(port, Config),

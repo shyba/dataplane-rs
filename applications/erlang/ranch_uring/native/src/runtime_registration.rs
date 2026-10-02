@@ -9,10 +9,10 @@
 use crate::runtime_arena::RuntimeArenas;
 use crate::runtime_reactor::{BufSlotId, LockedReadBufPool, BUF_SIZE, SUBSCRIBE_PAGE_SIZE};
 
-/// Layout of registered fixed file descriptors for a runtime shard.
+/// Layout of registered fixed buffers for a runtime shard.
 ///
 /// Organizes registered buffers into two segments:
-/// - Read fixed buffers (prefix): contiguous range at fixed file descriptor base.
+/// - Read fixed buffers (prefix): contiguous range at fixed buffer index zero.
 /// - Subscribe fixed buffers (suffix): optional arena-backed buffers following read buffers.
 #[derive(Clone, Debug)]
 pub(crate) struct RegistrationLayout {
@@ -20,17 +20,17 @@ pub(crate) struct RegistrationLayout {
     pub(super) descriptors: Vec<libc::iovec>,
     /// Slot IDs for registered read buffers in stable order.
     pub(super) read_fixed_slots: Vec<BufSlotId>,
-    /// Fixed file descriptor index for first read buffer (always 0).
+    /// Fixed buffer index for first read buffer (always 0).
     pub(super) read_fixed_base: u16,
     /// Number of read fixed descriptors.
     pub(super) read_fixed_len: usize,
-    /// Fixed file descriptor index for first subscribe buffer, if registered.
+    /// Fixed buffer index for first subscribe buffer, if registered.
     pub(super) subscribe_fixed_base: Option<u16>,
     /// Number of subscribe fixed descriptors.
     pub(super) subscribe_fixed_len: usize,
-    /// Maps read buffer slot index to registered fixed file descriptor index.
+    /// Maps read buffer slot index to registered fixed buffer index.
     pub(super) read_fixed_slot_table: Vec<Option<u16>>,
-    /// Maps subscribe slot index to registered fixed file descriptor index.
+    /// Maps subscribe slot index to its suffix-relative fixed buffer index.
     pub(super) subscribe_fixed_slot_table: Vec<Option<u16>>,
 }
 
@@ -54,10 +54,10 @@ pub(crate) fn plan_fixed_registration(
     register_subscribe_arena: bool,
     subscribe_slots: usize,
 ) -> FixedRegistrationPlan {
+    let per_shard_budget = memlock_limit / shard_count.max(1);
     let locked_read_bufs = if requested_locked_read_bufs == 0 || memlock_limit == usize::MAX {
         requested_locked_read_bufs
     } else {
-        let per_shard_budget = memlock_limit / shard_count.max(1);
         let max_locked_per_shard = per_shard_budget / BUF_SIZE;
         requested_locked_read_bufs.min(max_locked_per_shard)
     };
@@ -72,7 +72,7 @@ pub(crate) fn plan_fixed_registration(
     let read_registration_bytes = locked_read_bufs.saturating_mul(BUF_SIZE);
     let subscribe_registration_bytes = subscribe_slots.saturating_mul(SUBSCRIBE_PAGE_SIZE);
     let register_subscribe_arena =
-        read_registration_bytes.saturating_add(subscribe_registration_bytes) <= memlock_limit;
+        read_registration_bytes.saturating_add(subscribe_registration_bytes) <= per_shard_budget;
 
     FixedRegistrationPlan {
         locked_read_bufs,
@@ -150,5 +150,19 @@ pub(crate) fn build_registration_layout(
         subscribe_fixed_len,
         read_fixed_slot_table,
         subscribe_fixed_slot_table,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn subscribe_registration_shares_the_process_budget_across_shards() {
+        let plan = plan_fixed_registration(1, 2, 2 * BUF_SIZE, true, 1);
+        assert_eq!(plan.locked_read_bufs, 1);
+        assert!(!plan.register_subscribe_arena);
+        let plan = plan_fixed_registration(1, 2, 2 * (BUF_SIZE + SUBSCRIBE_PAGE_SIZE), true, 1);
+        assert!(plan.register_subscribe_arena);
     }
 }

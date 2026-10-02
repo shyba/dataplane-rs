@@ -1,3 +1,9 @@
+//! Erlang/Ranch integration over the dataplane runtime.
+//!
+//! `nif` is the VM entry boundary; `runtime` owns startup and shard execution.
+//! Session/registration modules adapt shared `dataplane-uring` primitives to
+//! Erlang resources. See the crate README for lifecycle and test requirements.
+
 #![deny(clippy::undocumented_unsafe_blocks)]
 
 pub mod local_boundary;
@@ -7,13 +13,8 @@ pub mod local_ingress;
 mod nif;
 pub mod replay_protocol;
 mod runtime;
-// NOTE: runtime_command and runtime_config are #[path] submodules of the runtime
-// module (runtime.rs) — they are NOT declared here.  They cannot be promoted to
-// top-level lib.rs modules because runtime_shard.rs and runtime_launch.rs both
-// import Command via "use crate::runtime::Command" (not crate::runtime_command).
-// Moving these modules to lib.rs would break those import paths and create a
-// cycle.  The #[path] attribute preserves physical adjacency while keeping the
-// import paths intact.
+// runtime_command/config are #[path] children of runtime, which re-exports
+// their types. Keep the filesystem layout separate from that module namespace.
 pub(crate) use dataplane_uring::id_map as runtime_id_map;
 mod runtime_launch;
 mod runtime_pending_reply;

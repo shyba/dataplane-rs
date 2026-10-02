@@ -1,23 +1,8 @@
 //! Configuration parsing helpers for the runtime.
 //!
-//! ## Canonical Wiring Style
-//!
-//! This module is a `#[path]` submodule of `runtime.rs` (not a direct child
-//! module of `lib.rs`).  Declared inline with `#[path]` so that sibling
-//! modules (notably `runtime_helpers.rs`) can import via the parent
-//! `runtime` module without needing to know the physical filename.
-//!
-//! The `runtime_config` name is not a public module name — it is a private
-//! implementation detail of the `runtime` module.  Callers outside `runtime`
-//! access these helpers through the `pub(crate)` re-exports in `runtime.rs`
-//! (`configured_stop_drain_profile`, etc.).
-//!
-//! ## Visibility Rules
-//!
-//! - All `configured_*` functions — `pub(crate)` (reached via runtime.rs)
-//! - `RecvRingMode` enum — defined here, re-exported via runtime.rs
-//! - `ShardRuntimeConfig` struct — `pub(crate)` (fields are private)
-//! - All `ShardRuntimeConfig` fields — private; access via accessor methods
+//! This file is a private `#[path]` child of `runtime`; helpers are re-exported
+//! there for sibling modules. `ShardRuntimeConfig` snapshots environment settings
+//! at startup so the shard loop need not repeatedly parse them.
 
 #[cfg(not(feature = "exec-strategy-sqpoll"))]
 use crate::runtime_reactor::{SqpollConfig, SqpollMode};
@@ -26,9 +11,9 @@ use crate::runtime_reactor::{SqpollConfig, SqpollMode};
 // Default constants (documented, single-source-of-truth for call sites)
 // ---------------------------------------------------------------------------
 
-/// Default idle wait nanoseconds when SQPOLL is accepted (5 ms).
+/// Default idle wait nanoseconds when SQPOLL is accepted (5 µs).
 pub const IDLE_WAIT_NS_SQPOLL: u64 = 5_000;
-/// Default idle wait nanoseconds when SQPOLL is not accepted (100 µs).
+/// Default idle wait nanoseconds when SQPOLL is not accepted (100 ns).
 pub const IDLE_WAIT_NS_NO_SQPOLL: u64 = 100;
 /// Default main ring submit batch size.
 #[cfg(not(feature = "exec-strategy-sqpoll"))]
@@ -43,10 +28,7 @@ pub const SQPOLL_IDLE_BATCH_DEFAULT: usize = 8;
 /// Default SQPOLL idle wait microseconds.
 pub const SQPOLL_IDLE_USEC_DEFAULT: u32 = 250;
 
-// --------------------------------------------------------------------------
-// RecvRingMode (used in both SQPOLL and non-SQPOLL builds)
-// --------------------------------------------------------------------------
-// RecvRingMode (used in both SQPOLL and non-SQPOLL builds, but variants only constructed in non-SQPOLL)
+// Variants are only constructed in non-SQPOLL builds.
 #[cfg_attr(feature = "exec-strategy-sqpoll", allow(dead_code))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RecvRingMode {
@@ -153,7 +135,6 @@ pub(crate) fn configured_main_submit_max_delay_ns() -> u64 {
         .unwrap_or(MAIN_SUBMIT_MAX_DELAY_NS_DEFAULT)
 }
 
-// RecvRingMode is now defined in this module (not in runtime.rs).
 #[cfg(not(feature = "exec-strategy-sqpoll"))]
 pub(crate) fn configured_recv_ring_mode() -> RecvRingMode {
     match std::env::var("RANCH_URING_RECV_RING")
@@ -183,8 +164,6 @@ pub(crate) fn configured_sqpoll_idle_usec() -> u32 {
         .filter(|v| *v > 0)
         .unwrap_or(SQPOLL_IDLE_USEC_DEFAULT)
 }
-
-// ShardRuntimeConfig and RecvRingMode are both defined in this module.
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ShardRuntimeConfig {

@@ -38,6 +38,17 @@ pub(super) fn dispatch_runtime_startup_profile_layout(
     .map_err(|_| NifError::StartupProfileLayout)
 }
 
+/// Validate the reference policy layout separately from the hosted mesh width.
+/// The reference layouts model two shards, but the NIF runtime has one ring set
+/// per requested shard. In particular an ENOMEM retry must really reduce width.
+pub(super) fn resolve_runtime_topology(
+    profile: TopologyProfile,
+) -> Result<dataplane_runtime::runtime_topology::ShardTopology> {
+    dispatch_runtime_startup_profile_layout(profile.clone().with_shard_count(2))?;
+    profile.resolve().map(|resolved| resolved.topology)
+        .map_err(|_| NifError::StartupProfileLayout)
+}
+
 pub(super) fn map_probe_err(err: std::io::Error) -> NifError {
     let errno = err.raw_os_error().unwrap_or(libc::EIO);
     match errno {
@@ -194,6 +205,15 @@ pub(crate) fn build_ring(
 mod tests {
     use super::*;
     use crate::runtime_reactor::SqpollMode;
+
+    #[test]
+    fn hosted_width_is_independent_of_dual_shard_reference_layout() {
+        for width in [1, 2, 4] {
+            let profile = crate::runtime_reactor::configured_topology_profile(width);
+            assert_eq!(profile.shard_count, width);
+            assert_eq!(resolve_runtime_topology(profile).unwrap().shard_count(), width);
+        }
+    }
 
     #[test]
     fn test_build_ring_ring_size_clamping() {

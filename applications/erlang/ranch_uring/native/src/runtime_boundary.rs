@@ -1,4 +1,4 @@
-use std::os::fd::RawFd;
+use std::os::fd::{OwnedFd, RawFd};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -19,13 +19,22 @@ use crate::runtime_ingress::{ingress_send, IngressReceiver, IngressSendError, In
 pub(super) struct ShardControl {
     pub(super) pending_commands: AtomicUsize,
     pub(super) next_request_id: AtomicU64,
+    // Both senders and the shard hold this existing Arc. Keep the eventfd alive
+    // until all users are gone, including failed startup and thread-spawn paths.
+    _wakeup_owner: Option<OwnedFd>,
 }
 
 impl ShardControl {
+    #[cfg(test)]
     pub(super) fn new() -> Self {
+        Self::with_wakeup_owner(None)
+    }
+
+    pub(super) fn with_wakeup_owner(wakeup_owner: Option<OwnedFd>) -> Self {
         Self {
             pending_commands: AtomicUsize::new(0),
             next_request_id: AtomicU64::new(1),
+            _wakeup_owner: wakeup_owner,
         }
     }
 }
@@ -100,5 +109,25 @@ fn map_ingress_send_error(err: IngressSendError) -> NifError {
     match err {
         IngressSendError::Closed => NifError::Closed,
         IngressSendError::Overloaded => NifError::from_errno(libc::EAGAIN),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{ErrorKind, Read};
+    use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn wakeup_owner_lives_until_last_control_reference() {
+        // A socket pair observes closure without racing other tests for fd ids.
+        let (owned, mut peer) = UnixStream::pair().unwrap();
+        peer.set_nonblocking(true).unwrap();
+        let control = Arc::new(ShardControl::with_wakeup_owner(Some(owned.into())));
+        let shard = Arc::clone(&control);
+        drop(control);
+        assert_eq!(peer.read(&mut [0]).unwrap_err().kind(), ErrorKind::WouldBlock);
+        drop(shard);
+        assert_eq!(peer.read(&mut [0]).unwrap(), 0);
     }
 }

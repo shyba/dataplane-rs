@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::mem::MaybeUninit;
-use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
+use std::os::fd::{AsRawFd, FromRawFd, IntoRawFd, OwnedFd, RawFd};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::Arc;
@@ -46,7 +46,7 @@ use crate::runtime_session::{
 #[cfg(test)]
 use crate::runtime_startup::RuntimeProfileDispatchSeam;
 use crate::runtime_startup::{
-    build_ring, dispatch_runtime_startup_profile_layout, map_feature_error,
+    build_ring, map_feature_error,
     probe_required_runtime_features,
 };
 use crate::runtime_stats::{
@@ -257,13 +257,9 @@ impl Runtime {
     fn start_with_shards(shard_count: usize) -> Result<Self> {
         let ring_size = configured_ring_size();
         let requested_locked_read_bufs = configured_locked_read_bufs_per_shard();
-        let (profile_layout, _profile_dispatch_seam) =
-            dispatch_runtime_startup_profile_layout(configured_topology_profile(shard_count))?;
-        let resolved_topology = profile_layout
-            .profile()
-            .resolve()
-            .map_err(|_| NifError::StartupProfileLayout)?;
-        let topology = resolved_topology.topology;
+        let topology = crate::runtime_startup::resolve_runtime_topology(
+            configured_topology_profile(shard_count),
+        )?;
         let shard_count = topology.shard_count();
         let cpus = topology.cpu_plan();
         #[cfg(feature = "exec-strategy-sqpoll")]
@@ -326,6 +322,10 @@ impl Runtime {
             if wakeup_fd < 0 {
                 return Err(NifError::last_os_error());
             }
+            // SAFETY: successful eventfd returned a fresh descriptor; shared
+            // control now owns it across setup, sender, and shard lifetimes.
+            let wakeup_owner = unsafe { OwnedFd::from_raw_fd(wakeup_fd) };
+            let control = Arc::new(ShardControl::with_wakeup_owner(Some(wakeup_owner)));
             let default_chunk_slots = if sqpoll_accepted {
                 CHANNEL_CAPACITY.saturating_mul(SQPOLL_CHUNK_ARENA_MULTIPLIER_NUM)
                     / SQPOLL_CHUNK_ARENA_MULTIPLIER_DEN
@@ -434,7 +434,6 @@ impl Runtime {
                 Vec::new()
             };
             let (tx, rx) = ingress_channel::<Command>();
-            let control = Arc::new(ShardControl::new());
             let sender = ShardSender {
                 tx,
                 wakeup_fd,
@@ -1345,8 +1344,9 @@ pub(super) fn advance_active_mode(
 #[cfg(test)]
 mod runtime_lane_tests {
     use super::runtime_config::ShardRuntimeConfig;
+    use crate::runtime_startup::dispatch_runtime_startup_profile_layout;
     use super::{
-        build_registration_layout, dispatch_runtime_startup_profile_layout, ingress_try_recv,
+        build_registration_layout, ingress_try_recv,
         plan_fixed_registration, shard_from_routed_id, shutdown_started_shards, Command,
         RuntimeProfileDispatchSeam, ShardControl, ShardSender,
     };
