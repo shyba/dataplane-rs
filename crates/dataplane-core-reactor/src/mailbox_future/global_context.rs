@@ -91,7 +91,7 @@ impl GlobalContext {
         let runtime_locals = (0..shard_count)
             .map(|shard| {
                 Mutex::new(Some(ShardRuntimeQueues {
-                    inbound: inbound[shard].drain(..).collect(),
+                    inbound: std::mem::take(&mut inbound[shard]),
                 }))
             })
             .collect();

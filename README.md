@@ -7,11 +7,11 @@ thread-per-core designs—not as a drop-in Tokio replacement. APIs are evolving.
 ## Try it
 
 On Linux, install a current stable Rust toolchain, a C compiler/linker,
-`pkg-config`, and the hwloc development library. On Debian/Ubuntu:
+`pkg-config`, and the hwloc/udev development libraries. On Debian/Ubuntu:
 
 ```sh
 sudo apt-get update
-sudo apt-get install --yes build-essential pkg-config libhwloc-dev
+sudo apt-get install --yes build-essential pkg-config libhwloc-dev libudev-dev
 ```
 
 Then run from this checkout:
