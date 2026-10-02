@@ -198,9 +198,10 @@ where
         Self::with_task_capacity_internal(task_capacity, None)
     }
 
+    /// Preallocate up to `task_capacity` slots without exceeding the hard limit.
+    /// A zero `max_slots` creates an engine that rejects all admission.
     pub fn with_task_capacity_limit(task_capacity: usize, max_slots: usize) -> Self {
-        let task_capacity = task_capacity.max(1);
-        let max_slots = max_slots.max(task_capacity);
+        let task_capacity = task_capacity.max(1).min(max_slots);
         Self::with_task_capacity_internal(task_capacity, Some(max_slots))
     }
 
@@ -219,7 +220,7 @@ where
         Self {
             ready: VecDeque::with_capacity(task_capacity),
             slots,
-            free_head: 0,
+            free_head: if task_capacity == 0 { u32::MAX } else { 0 },
             active: 0,
             max_slots,
             deferred_children: VecDeque::new(),
@@ -769,6 +770,19 @@ mod tests {
         assert_eq!(progressed, 4);
         assert_eq!(engine.active_tasks(), 0);
         assert_eq!(engine.ready_len(), 0);
+    }
+
+    #[test]
+    fn hard_limit_wins_over_preallocation_hint_including_zero() {
+        let mut zero = NativeTaskEngine::with_task_capacity_limit(8, 0);
+        let error = zero.try_spawn(CounterTask { remaining: 7 }).unwrap_err();
+        assert_eq!(error.max_slots(), 0);
+        assert_eq!(error.into_task().remaining, 7);
+        assert_eq!(zero.run_until_idle(), 0);
+
+        let mut one = NativeTaskEngine::with_task_capacity_limit(8, 1);
+        assert!(one.try_spawn(CounterTask { remaining: 1 }).is_ok());
+        assert!(one.try_spawn(CounterTask { remaining: 1 }).is_err());
     }
 
     #[test]

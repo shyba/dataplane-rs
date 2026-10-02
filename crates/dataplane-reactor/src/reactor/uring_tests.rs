@@ -37,15 +37,9 @@ fn send_all_completes_full_payload() {
     });
 
     let mut reactor = UringReactor::new(256).expect("create uring reactor");
-    let token = Reactor::submit(
-        &mut reactor,
-        NetOp::SendAll {
-            fd: tx_fd,
-            ptr: payload.as_ptr(),
-            len: payload.len(),
-        },
-    )
-    .expect("submit send_all");
+    // SAFETY: payload stays valid and unchanged through terminal completion.
+    let token = unsafe { Reactor::submit(&mut reactor, NetOp::SendAll { fd: tx_fd, ptr: payload.as_ptr(), len: payload.len() }) }
+        .expect("submit send_all");
     reactor.submit_pending().expect("submit pending");
 
     let mut done = false;
@@ -163,26 +157,14 @@ fn udp_send_recv_completes() {
     let mut tx_reactor = UringReactor::new(64).expect("create tx reactor");
     let mut rx_reactor = UringReactor::new(64).expect("create rx reactor");
 
-    let rx_token = Reactor::submit(
-        &mut rx_reactor,
-        NetOp::UdpRecv {
-            fd: std::os::fd::AsRawFd::as_raw_fd(&b),
-            ptr: recv_buf.as_mut_ptr(),
-            len: recv_buf.len(),
-        },
-    )
-    .expect("submit udp recv");
+    // SAFETY: receive buffer remains writable and alive through completion.
+    let rx_token = unsafe { Reactor::submit(&mut rx_reactor, NetOp::UdpRecv { fd: std::os::fd::AsRawFd::as_raw_fd(&b), ptr: recv_buf.as_mut_ptr(), len: recv_buf.len() }) }
+        .expect("submit udp recv");
     rx_reactor.submit_pending().expect("submit recv pending");
 
-    let tx_token = Reactor::submit(
-        &mut tx_reactor,
-        NetOp::UdpSend {
-            fd: std::os::fd::AsRawFd::as_raw_fd(&a),
-            ptr: payload.as_ptr(),
-            len: payload.len(),
-        },
-    )
-    .expect("submit udp send");
+    // SAFETY: payload remains readable and alive through completion.
+    let tx_token = unsafe { Reactor::submit(&mut tx_reactor, NetOp::UdpSend { fd: std::os::fd::AsRawFd::as_raw_fd(&a), ptr: payload.as_ptr(), len: payload.len() }) }
+        .expect("submit udp send");
     tx_reactor.submit_pending().expect("submit send pending");
 
     let mut sent_ok = false;
@@ -255,17 +237,9 @@ fn udp_recv_batch_completes_with_single_datagram() {
     let fd = std::os::fd::AsRawFd::as_raw_fd(&server);
 
     let mut reactor = UringReactor::new(128).expect("create uring reactor");
-    let token = Reactor::submit(
-        &mut reactor,
-        NetOp::UdpRecvBatch {
-            fd,
-            slots_ptr: &mut slot as *mut UdpRecvSlot,
-            slots_len: 1,
-            flags: libc::MSG_DONTWAIT,
-            prefer_multishot: true,
-        },
-    )
-    .expect("submit udp recv batch");
+    // SAFETY: slot and receive buffer stay stable until terminal completion.
+    let token = unsafe { Reactor::submit(&mut reactor, NetOp::UdpRecvBatch { fd, slots_ptr: &mut slot, slots_len: 1, flags: libc::MSG_DONTWAIT, prefer_multishot: true }) }
+        .expect("submit udp recv batch");
     reactor.submit_pending().expect("submit pending");
 
     let mut got = None;
@@ -309,7 +283,8 @@ fn wait_deadline_returns_within_timeout_when_io_idle() {
         ptr: buf.as_mut_ptr(),
         len: buf.len(),
     };
-    let _ = crate::reactor::Reactor::submit(&mut reactor, op);
+    // SAFETY: buffer and socket remain alive across the deadline wait.
+    let _ = unsafe { crate::reactor::Reactor::submit(&mut reactor, op) };
 
     let start = std::time::Instant::now();
     let waited = reactor.wait_deadline(1, Some(20_000_000));
@@ -363,4 +338,18 @@ fn cancel_accept_multi_closes_late_accepted_fds() {
         fds_after <= fds_before + 1,
         "accepted fds leaked after cancel: before={fds_before} after={fds_after}"
     );
+}
+
+#[test]
+fn buffered_completions_count_as_outstanding_and_respect_zero_budget() {
+    use crate::reactor::{OpToken, ReactorDriver};
+    let mut reactor = UringReactor::new(8).expect("create test ring");
+    reactor.ready_events.push_back(NetEvent::OpComplete {
+        token: OpToken(1), kind: NetOpKind::Send, result: 0, flags: 0,
+    });
+    assert_eq!(reactor.outstanding(), 1);
+    assert_eq!(reactor.drain(0, |_| panic!("zero budget")).unwrap(), 0);
+    assert_eq!(reactor.outstanding(), 1);
+    assert_eq!(reactor.drain(1, |_| {}).unwrap(), 1);
+    assert_eq!(reactor.outstanding(), 0);
 }

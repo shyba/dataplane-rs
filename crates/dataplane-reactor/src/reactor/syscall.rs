@@ -5,9 +5,20 @@ use std::time::Duration;
 
 use super::{
     DriverBackendKind, DriverCapabilities, EventContext, Handler, NetEvent, NetOp, NetOpKind,
-    NetSubscription, NetSubscriptionEvent, OpToken, Reactor, ReactorDriver, ReactorDriverWait,
+    NetSubscription, NetSubscriptionEvent, OpToken, RawNetOp, Reactor, ReactorDriver, ReactorDriverWait,
     SubscriptionToken,
 };
+
+
+#[inline]
+fn deadline_timespec(timeout_ns: u64) -> libc::timespec {
+    let seconds = timeout_ns / 1_000_000_000;
+    libc::timespec {
+        tv_sec: seconds.min(libc::time_t::MAX as u64) as libc::time_t,
+        tv_nsec: (timeout_ns % 1_000_000_000) as libc::c_long,
+    }
+}
+
 
 fn last_errno() -> i32 {
     io::Error::last_os_error()
@@ -178,6 +189,42 @@ impl SyscallReactor {
         false
     }
 
+    /// Waits on the epoll set with nanosecond timeout precision. The syscall is
+    /// confined to the explicit deadline-wait path.
+    fn wait_for_epoll_timeout_ns(&mut self, timeout_ns: u64) -> bool {
+        let Some(epoll_fd) = self.epoll_fd else { return false; };
+        if self.watched_fds.is_empty() { return false; }
+        let mut events = [libc::epoll_event { events: 0, u64: 0 }; 64];
+        let timeout = deadline_timespec(timeout_ns);
+        // SAFETY: epoll_fd is owned by this reactor, events is a valid output buffer,
+        // timeout is initialized, and the null signal mask is valid.
+        let rc = unsafe { libc::syscall(
+            libc::SYS_epoll_pwait2, epoll_fd, events.as_mut_ptr(), events.len() as i32,
+            &timeout as *const libc::timespec, std::ptr::null::<libc::sigset_t>(), 8usize,
+        ) };
+        let result = if rc >= 0 { Ok(rc) } else { Err(last_errno()) };
+        self.finish_epoll_pwait2_wait(timeout_ns, result)
+    }
+
+    fn finish_epoll_pwait2_wait(
+        &mut self,
+        timeout_ns: u64,
+        result: Result<libc::c_long, i32>,
+    ) -> bool {
+        match result {
+            Ok(_) | Err(libc::EINTR) => true,
+            Err(libc::ENOSYS) => {
+                let timeout_ms = timeout_ns.div_ceil(1_000_000).min(i32::MAX as u64) as i32;
+                self.wait_for_epoll_timeout(timeout_ms)
+            }
+            Err(_) => {
+                self.disable_epoll();
+                false
+            }
+        }
+    }
+
+
     fn try_simple(op: &NetOp) -> Option<i32> {
         let res: isize = match op {
             // SAFETY: connect is safe when fd is a valid socket and addr points to
@@ -188,7 +235,7 @@ impl SyscallReactor {
             // SAFETY: send is safe when fd is a valid socket, ptr points to valid memory
             // of at least len bytes, and MSG_DONTWAIT makes it non-blocking.
             NetOp::Send { fd, ptr, len } => unsafe {
-                libc::send(*fd, ptr.cast(), *len, libc::MSG_DONTWAIT)
+                libc::send(*fd, ptr.cast(), *len, libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL)
             },
             // SAFETY: recv is safe when fd is a valid socket, ptr points to a writable
             // buffer of at least len bytes, and MSG_DONTWAIT makes it non-blocking.
@@ -198,7 +245,7 @@ impl SyscallReactor {
             // SAFETY: send for UDP is safe when fd is a valid UDP socket, ptr points to
             // valid memory of at least len bytes, and MSG_DONTWAIT makes it non-blocking.
             NetOp::UdpSend { fd, ptr, len } => unsafe {
-                libc::send(*fd, ptr.cast(), *len, libc::MSG_DONTWAIT)
+                libc::send(*fd, ptr.cast(), *len, libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL)
             },
             // SAFETY: recv for UDP is safe when fd is a valid UDP socket, ptr points to
             // a writable buffer of at least len bytes, and MSG_DONTWAIT makes it non-blocking.
@@ -233,7 +280,7 @@ impl SyscallReactor {
             let next_ptr = unsafe { ptr.add(sent) };
             // SAFETY: send with DONTWAIT is safe when fd is a valid socket, next_ptr
             // points to valid memory of at least len-sent bytes.
-            let rc = unsafe { libc::send(fd, next_ptr.cast(), len - sent, libc::MSG_DONTWAIT) };
+            let rc = unsafe { libc::send(fd, next_ptr.cast(), len - sent, libc::MSG_DONTWAIT | libc::MSG_NOSIGNAL) };
             if rc > 0 {
                 sent += rc as usize;
                 continue;
@@ -242,7 +289,7 @@ impl SyscallReactor {
                 return Err(libc::EPIPE);
             }
             let errno = last_errno();
-            if is_would_block(errno) {
+            if is_would_block(errno) || errno == libc::EINTR {
                 return Ok(SendAllProgress::Pending(sent));
             }
             return Err(errno);
@@ -562,7 +609,7 @@ impl SyscallReactor {
         F: FnMut(NetEvent),
     {
         let mut drained = 0usize;
-        let limit = max_events.max(1);
+        let limit = max_events;
         while drained < limit {
             let Some(event) = self.ready_events.pop_front() else {
                 break;
@@ -577,7 +624,7 @@ impl SyscallReactor {
 impl Reactor for SyscallReactor {
     type Error = io::Error;
 
-    fn submit(&mut self, op: NetOp) -> Result<OpToken, Self::Error> {
+    unsafe fn submit(&mut self, op: NetOp) -> Result<OpToken, Self::Error> {
         let raw = self.alloc_token();
         let token = OpToken(raw);
         self.submit_with_token(op, token)?;
@@ -640,12 +687,13 @@ impl Reactor for SyscallReactor {
 impl ReactorDriver for SyscallReactor {
     type Error = io::Error;
     type Token = OpToken;
-    type Submit = NetOp;
+    type Submit = RawNetOp;
     type Event = NetEvent;
 
     fn submit(&mut self, op: Self::Submit, token: Self::Token) -> Result<(), Self::Error> {
-        self.submit_with_token(op, token)
+        self.submit_with_token(op.into_inner(), token)
     }
+
 
     fn flush(&mut self) -> Result<usize, Self::Error> {
         self.submit_pending()
@@ -656,7 +704,7 @@ impl ReactorDriver for SyscallReactor {
         F: FnMut(Self::Event),
     {
         let mut drained = self.drain_ready_events(max_events, &mut on_event);
-        let limit = max_events.max(1);
+        let limit = max_events;
         if drained >= limit {
             return Ok(drained);
         }
@@ -675,7 +723,7 @@ impl ReactorDriver for SyscallReactor {
     }
 
     fn outstanding(&self) -> usize {
-        self.pending.len()
+        self.pending.len() + self.ready_events.len()
     }
 
     fn capabilities(&self) -> DriverCapabilities {
@@ -722,15 +770,12 @@ impl ReactorDriverWait for SyscallReactor {
 
         let events = self.poll_once();
         if events.is_empty() {
-            let timeout_ms = timeout_ns
-                .div_ceil(1_000_000)
-                .min(i32::MAX as u64) as i32;
-            if !self.wait_for_epoll_timeout(timeout_ms) {
-                // No epoll: sleep a bounded slice of the deadline. 1ms keeps
-                // pending-op retries responsive without the previous 50us
-                // busy-spin across long deadlines.
+            if !self.wait_for_epoll_timeout_ns(timeout_ns) {
+                // No epoll: retry pending non-epoll operations after a bounded sleep.
+                // The supported epoll paths wake immediately when I/O arrives.
                 std::thread::sleep(Duration::from_nanos(timeout_ns.min(1_000_000)));
             }
+
             let events = self.poll_once();
             let count = events.len();
             self.ready_events.extend(events);
@@ -754,6 +799,14 @@ mod tests {
     use crate::reactor::UdpRecvSlot;
     use std::net::UdpSocket;
 
+    #[test]
+    fn deadline_timespec_preserves_submillisecond_precision() {
+        let ts = deadline_timespec(250_123);
+        assert_eq!(ts.tv_sec, 0);
+        assert_eq!(ts.tv_nsec, 250_123);
+    }
+
+
     fn socket_pair_stream_nonblocking() -> (RawFd, RawFd) {
         let mut fds = [0i32; 2];
         let rc = unsafe { libc::socketpair(libc::AF_UNIX, libc::SOCK_STREAM, 0, fds.as_mut_ptr()) };
@@ -770,18 +823,90 @@ mod tests {
     }
 
     #[test]
+    fn unsupported_epoll_pwait2_fallback_wakes_on_io() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let target = receiver.local_addr().unwrap();
+        let mut reactor = SyscallReactor::new().unwrap();
+        let fd = std::os::fd::AsRawFd::as_raw_fd(&receiver);
+        assert_eq!(reactor.watch_fd(fd), Some(fd));
+
+        // Restrict interest to input; writable UDP sockets otherwise wake immediately.
+        let epoll_fd = reactor.epoll_fd.unwrap();
+        let mut event = libc::epoll_event { events: libc::EPOLLIN as u32, u64: fd as u64 };
+        // SAFETY: both fds are live, and event is a valid initialized epoll_event.
+        assert_eq!(unsafe { libc::epoll_ctl(epoll_fd, libc::EPOLL_CTL_MOD, fd, &mut event) }, 0);
+
+        let sender_thread = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(10));
+            sender.send_to(b"wake", target).unwrap();
+        });
+        let start = std::time::Instant::now();
+        let waited = reactor.finish_epoll_pwait2_wait(500_000_000, Err(libc::ENOSYS));
+        assert!(waited);
+        assert!(reactor.epoll_fd.is_some(), "unsupported fallback disabled epoll");
+        assert!(start.elapsed() < Duration::from_millis(250));
+        sender_thread.join().unwrap();
+    }
+
+
+    #[test]
+    fn syscall_deadline_wait_uses_epoll_nanosecond_timeout() {
+        let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let mut reactor = SyscallReactor::new().unwrap();
+        let fd = std::os::fd::AsRawFd::as_raw_fd(&socket);
+        assert_eq!(reactor.watch_fd(fd), Some(fd));
+
+        let start = std::time::Instant::now();
+        let ready = ReactorDriverWait::wait_deadline(&mut reactor, 1, Some(250_000)).unwrap();
+        assert_eq!(ready, 0);
+        assert!(reactor.epoll_fd.is_some(), "epoll_pwait2 failed");
+        assert!(start.elapsed() < Duration::from_millis(100));
+    }
+
+
+    #[test]
+    fn zero_budget_and_buffered_completions_preserve_outstanding_count() {
+        let mut reactor = SyscallReactor::new().unwrap();
+        for token in [OpToken(1), OpToken(2)] {
+            // SAFETY: this invalid-fd case validates completion accounting only; the pointer is
+            // non-dereferenced by the syscall error path and the operation completes immediately.
+            let op = unsafe {
+                RawNetOp::new(NetOp::Send {
+                    fd: -1,
+                    ptr: b"".as_ptr(),
+                    len: 0,
+                })
+            };
+            ReactorDriver::submit(&mut reactor, op, token).unwrap();
+        }
+        assert_eq!(reactor.drain(0, |_| panic!("zero budget")).unwrap(), 0);
+        assert_eq!(reactor.outstanding(), 2);
+        assert_eq!(reactor.drain(1, |_| {}).unwrap(), 1);
+        assert_eq!(reactor.ready_events.len(), 1);
+        assert_eq!(reactor.outstanding(), 1);
+        assert_eq!(reactor.drain(0, |_| panic!("zero budget")).unwrap(), 0);
+        assert_eq!(reactor.outstanding(), 1);
+        assert_eq!(reactor.drain(1, |_| {}).unwrap(), 1);
+        assert_eq!(reactor.outstanding(), 0);
+    }
+
+    #[test]
     fn send_zero_completes() {
         let (tx_fd, rx_fd) = socket_pair_stream_nonblocking();
         let mut reactor = SyscallReactor::new().expect("new reactor");
         let zero = [0u8; 1];
-        let token = Reactor::submit(
-            &mut reactor,
-            NetOp::Send {
-                fd: tx_fd,
-                ptr: zero.as_ptr(),
-                len: 0,
-            },
-        )
+        // SAFETY: the zero-length send uses a live socket and stack buffer through completion.
+        let token = unsafe {
+            Reactor::submit(
+                &mut reactor,
+                NetOp::Send {
+                    fd: tx_fd,
+                    ptr: zero.as_ptr(),
+                    len: 0,
+                },
+            )
+        }
         .expect("submit");
         let _ = reactor.submit_pending().expect("submit pending");
         let mut got = None;
@@ -830,16 +955,19 @@ mod tests {
 
         let fd = std::os::fd::AsRawFd::as_raw_fd(&server);
         let mut reactor = SyscallReactor::new().expect("new reactor");
-        let token = Reactor::submit(
-            &mut reactor,
-            NetOp::UdpRecvBatch {
-                fd,
-                slots_ptr: &mut slot as *mut UdpRecvSlot,
-                slots_len: 1,
-                flags: libc::MSG_DONTWAIT,
-                prefer_multishot: false,
-            },
-        )
+        // SAFETY: slot and receive buffer stay live and stable through the terminal event.
+        let token = unsafe {
+            Reactor::submit(
+                &mut reactor,
+                NetOp::UdpRecvBatch {
+                    fd,
+                    slots_ptr: &mut slot,
+                    slots_len: 1,
+                    flags: libc::MSG_DONTWAIT,
+                    prefer_multishot: false,
+                },
+            )
+        }
         .expect("submit udp recv batch");
         let _ = reactor.submit_pending().expect("submit pending");
 

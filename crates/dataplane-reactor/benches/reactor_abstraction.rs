@@ -55,12 +55,8 @@ fn bench_reactor_abstraction_submit_send0(c: &mut Criterion) {
         let mut reactor = UnifiedReactor::new(64, ReactorBackend::Syscall)
             .expect("create unified syscall reactor");
         b.iter(|| {
-            let token = reactor
-                .submit(NetOp::Send {
-                    fd: tx_fd,
-                    ptr: zero.as_ptr(),
-                    len: 0,
-                })
+            // SAFETY: zero-length send uses a live socket and stable stack buffer.
+            let token = unsafe { reactor.submit(NetOp::Send { fd: tx_fd, ptr: zero.as_ptr(), len: 0 }) }
                 .expect("submit send");
             black_box(token);
             black_box(reactor.submit_pending().expect("submit pending"));
@@ -74,12 +70,8 @@ fn bench_reactor_abstraction_submit_send0(c: &mut Criterion) {
             let mut reactor =
                 UnifiedReactor::new(64, ReactorBackend::IoUring).expect("create unified uring");
             b.iter(|| {
-                let token = reactor
-                    .submit(NetOp::Send {
-                        fd: tx_fd,
-                        ptr: zero.as_ptr(),
-                        len: 0,
-                    })
+                // SAFETY: zero-length send uses a live socket and stable stack buffer.
+                let token = unsafe { reactor.submit(NetOp::Send { fd: tx_fd, ptr: zero.as_ptr(), len: 0 }) }
                     .expect("submit send");
                 black_box(token);
                 black_box(reactor.submit_pending().expect("submit pending"));

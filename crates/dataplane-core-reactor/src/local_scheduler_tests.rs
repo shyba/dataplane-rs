@@ -256,3 +256,56 @@ fn trace_ring_overwrites_oldest_stamp() {
     let non_zero = stamps.iter().filter(|stamp| stamp.ticks != 0).count();
     assert_eq!(non_zero, TRACE_STAMP_DEPTH);
 }
+
+#[test]
+fn terminal_results_at_budget_boundary_are_not_requeued() {
+    for action in [WorkDisposition::Complete, WorkDisposition::AllDone] {
+        let placements = sample_placements();
+        let mesh = build_shard_mesh::<TaskCell<u64, 256>>(4, 8).remove(0);
+        let (tx, rx) = kanal::bounded(8);
+        let mut scheduler = LocalMeshScheduler::<u64, 256>::new(
+            placements[0],
+            &placements,
+            mesh,
+            tx,
+            Arc::new(rx),
+            ShardSchedulerConfig {
+                run_budget: 1,
+                ..Default::default()
+            },
+        );
+        assert!(scheduler
+            .submit_work(TaskMeta::global(TaskPriority::Normal), 7)
+            .is_ok());
+        let mut calls = 0;
+        let report = scheduler.tick(|_| {
+            calls += 1;
+            action
+        });
+        assert_eq!(report.local_executed, 1);
+        assert_eq!(scheduler.task_count(), 0);
+        scheduler.tick(|_| {
+            calls += 1;
+            action
+        });
+        assert_eq!(calls, 1);
+    }
+}
+
+#[test]
+fn normal_priority_bus_deferral_requeues_the_new_task_key() {
+    let placements = sample_placements();
+    let mesh = build_shard_mesh::<TaskCell<u64, 256>>(4, 8).remove(0);
+    let (tx, rx) = kanal::bounded(8);
+    let mut scheduler = LocalMeshScheduler::<u64, 256>::new(
+        placements[0], &placements, mesh, tx, Arc::new(rx),
+        ShardSchedulerConfig { run_budget: 1, ..Default::default() },
+    );
+    assert!(scheduler.submit_work(TaskMeta::global(TaskPriority::Normal), 7).is_ok());
+    scheduler.tick(|_| WorkDisposition::DeferBus);
+    assert_eq!(scheduler.task_count(), 1);
+    let mut calls = 0;
+    scheduler.tick(|_| { calls += 1; WorkDisposition::Complete });
+    assert_eq!(calls, 1);
+    assert_eq!(scheduler.task_count(), 0);
+}

@@ -1,8 +1,11 @@
 struct ShardBatch<T> {
     staged: Vec<T>,
-    weight: usize,
+    remaining_weight: usize,
 }
 
+/// Per-shard weighted batching with caller-owned publication.
+/// Shard indices must be in range. The publication callback may drain the batch;
+/// any items it leaves behind are dropped when the callback returns.
 pub struct LocalShardPublisher<T> {
     shards: Vec<ShardBatch<T>>,
     weight_budget: usize,
@@ -14,7 +17,7 @@ impl<T> LocalShardPublisher<T> {
             shards: (0..shard_count)
                 .map(|_| ShardBatch {
                     staged: Vec::with_capacity(weight_budget),
-                    weight: 0,
+                    remaining_weight: weight_budget.max(1),
                 })
                 .collect(),
             weight_budget: weight_budget.max(1),
@@ -44,8 +47,11 @@ impl<T> LocalShardPublisher<T> {
         let should_flush = {
             let shard_batch = &mut self.shards[shard];
             shard_batch.staged.push(item);
-            shard_batch.weight += weight;
-            shard_batch.weight >= self.weight_budget
+            let should_flush = weight >= shard_batch.remaining_weight;
+            // Oversized weights flush immediately, so this wrapped value is
+            // reset before it can be observed by a callback or another push.
+            shard_batch.remaining_weight = shard_batch.remaining_weight.wrapping_sub(weight);
+            should_flush
         };
         if should_flush {
             self.flush_shard(shard, &mut publish);
@@ -67,7 +73,7 @@ impl<T> LocalShardPublisher<T> {
     {
         let shard_batch = &mut self.shards[shard];
         let is_empty = shard_batch.staged.is_empty();
-        shard_batch.weight = 0;
+        shard_batch.remaining_weight = self.weight_budget;
         if is_empty {
             return;
         }
@@ -113,6 +119,15 @@ mod tests {
         published.clear();
         publisher.flush_all(|shard, staged| published.push((shard, staged.clone())));
         assert!(published.is_empty());
+    }
+
+    #[test]
+    fn overflowing_weight_flushes_instead_of_wrapping() {
+        let mut publisher = LocalShardPublisher::new(1, 16);
+        publisher.push_weighted(0, 1, 1, |_, _| panic!("under budget"));
+        let mut published = Vec::new();
+        publisher.push_weighted(0, 2, usize::MAX, |_, batch| published.extend_from_slice(batch));
+        assert_eq!(published, vec![1, 2]);
     }
 
     #[test]

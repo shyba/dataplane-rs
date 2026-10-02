@@ -292,7 +292,11 @@ impl<Op, const STACK_BYTES: usize, Focus: FocusPolicy, Push: PushPolicy>
                 task.stamp(&self.clock, TraceStep::Executed);
 
                 local_polls = local_polls.saturating_add(1);
-                if report_local_executed.saturating_add(local_polls) >= self.config.run_budget {
+                // A terminal result must win over the polling budget; otherwise
+                // the last completed task is executed again on the next tick.
+                if action == WorkDisposition::Requeue
+                    && report_local_executed.saturating_add(local_polls) >= self.config.run_budget
+                {
                     budget_requeue = true;
                     break WorkDisposition::Requeue;
                 }
@@ -353,15 +357,17 @@ impl<Op, const STACK_BYTES: usize, Focus: FocusPolicy, Push: PushPolicy>
                         if matches!(self.bus_tx.try_send_option(&mut deferred), Ok(true)) {
                             report.bus_deferred += 1;
                         } else {
-                            let requeued = deferred.take().expect("task retained on failed bus send");
+                            let requeued =
+                                deferred.take().expect("task retained on failed bus send");
                             let id = self.tasks.insert(requeued);
                             self.ready.push_back(id);
                             report.bus_rejected += 1;
                         }
                     } else {
-                        self.ready.push_back(task_id);
+                        // Reinsertion mints a new generation; the removed key
+                        // is stale even if the same physical slot is reused.
                         let id = self.tasks.insert(removed);
-                        debug_assert_eq!(task_id, id);
+                        self.ready.push_back(id);
                     }
                 }
             }
@@ -553,7 +559,9 @@ impl<Op, const STACK_BYTES: usize, Focus: FocusPolicy, Push: PushPolicy>
                         report.dropped += 1;
                     }
                 } else {
-                    crate::scheduler_trace!("mesh ingress task dropped: no local slot or offload route");
+                    crate::scheduler_trace!(
+                        "mesh ingress task dropped: no local slot or offload route"
+                    );
                     report.dropped += 1;
                 }
             }

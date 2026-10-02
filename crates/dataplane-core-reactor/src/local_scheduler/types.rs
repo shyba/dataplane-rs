@@ -145,7 +145,7 @@ pub struct TickReport {
 /// Cumulative, per-shard scheduler telemetry folded from every [`TickReport`].
 ///
 /// Each shard owns its scheduler single-threaded, so these are plain counters with
-/// no atomics: folding is a hot-path `+=` and [`snapshot`](LocalMeshScheduler::stats)
+/// no atomics: folding is a hot-path `+=` and [`snapshot`](super::LocalMeshScheduler::stats)
 /// is a struct copy. Aggregate across shards by summing snapshots. This is the durable
 /// record of shed/drop/offload activity that a bare `TickReport` throws away each tick.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

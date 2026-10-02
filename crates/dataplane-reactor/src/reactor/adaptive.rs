@@ -4,8 +4,8 @@ use super::syscall::SyscallReactor;
 use super::uring::UringReactor;
 use super::{
     DriverBackendKind as ReactorBackendKind, DriverCapabilities as ReactorCapabilities, Handler,
-    NetEvent, NetOp, NetSubscription, NetSubscriptionEvent, OpToken, Reactor, ReactorDriver,
-    ReactorDriverWait, SubscriptionToken,
+    NetEvent, NetOp, NetSubscription, NetSubscriptionEvent, OpToken, RawNetOp, Reactor,
+    ReactorDriver, ReactorDriverWait, SubscriptionToken,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,7 +24,7 @@ pub enum UnifiedReactor {
 impl ReactorDriver for UnifiedReactor {
     type Error = io::Error;
     type Token = OpToken;
-    type Submit = NetOp;
+    type Submit = RawNetOp;
     type Event = NetEvent;
 
     fn submit(&mut self, op: Self::Submit, token: Self::Token) -> Result<(), Self::Error> {
@@ -132,10 +132,10 @@ impl UnifiedReactor {
 impl Reactor for UnifiedReactor {
     type Error = io::Error;
 
-    fn submit(&mut self, op: NetOp) -> Result<OpToken, Self::Error> {
+    unsafe fn submit(&mut self, op: NetOp) -> Result<OpToken, Self::Error> {
         match self {
-            Self::IoUring(r) => Reactor::submit(r, op),
-            Self::Syscall(r) => Reactor::submit(r, op),
+            Self::IoUring(r) => unsafe { Reactor::submit(r, op) },
+            Self::Syscall(r) => unsafe { Reactor::submit(r, op) },
         }
     }
 

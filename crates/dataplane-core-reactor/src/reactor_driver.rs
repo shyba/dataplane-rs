@@ -7,7 +7,7 @@ pub enum DriverBackendKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Driver feature flags surfaced to runtime policy layers.
 ///
-/// Embedded M9J contract (DP-EMB-0091):
+/// Conservative embedded integration contract:
 /// - An ESP32 embedded driver is expected to report conservative capabilities:
 ///   `supports_accept_multi = false`, `supports_multishot = false`,
 ///   `supports_fixed_buffers = false`, and `supports_sqpoll = false`
@@ -24,7 +24,7 @@ pub struct DriverCapabilities {
 
 /// Minimal reactor-driver contract consumed by the runtime core.
 ///
-/// Embedded M9J contract (DP-EMB-0091):
+/// Integration requirements:
 /// - Current embedded host-loop paths require a driver that implements
 ///   `ReactorDriver` and `ReactorDriverWait`.
 /// - For the current network runtime shape, associated types must align with
@@ -39,25 +39,12 @@ pub trait ReactorDriver {
     type Submit;
     type Event;
 
-    /// Submits one operation to the backend with an associated token.
+    /// Queues one operation with its completion token.
     ///
-    /// The token is passed through unchanged to the runtime's completion path;
-    /// the driver does not retain or consume the token value. The caller is
-    /// responsible for ensuring the token remains valid until the completion
-    /// is observed via `drain`.
-    ///
-    /// Ownership contract:
-    /// - The operation (`op`) may be consumed or moved by the implementation.
-    /// - The token is not consumed: it remains owned by the caller and is
-    ///   only presented to `on_event` callbacks as associated metadata.
-    /// - After a successful `submit`, the caller may drop `op` and reuse or
-    ///   drop the token; the driver guarantees the token value will be
-    ///   delivered to `on_event` at most once.
-    ///
-    /// Error contract:
-    /// - `Err(e)` means the operation was not queued and no completion will
-    ///   be emitted for this `op`/`token` pair.
-    /// - Implementations must not emit a completion for a failed `submit`.
+    /// Raw network I/O is admitted through RawNetOp, whose unsafe constructor records
+    /// the caller's external-resource obligations; moving or dropping the wrapper does
+    /// not discharge them. Failed submission is not permission to invalidate resources
+    /// if the backend may have begun access.
     fn submit(&mut self, op: Self::Submit, token: Self::Token) -> Result<(), Self::Error>;
     /// Pushes queued submissions to the backend and returns how many were
     /// submitted in this call.
@@ -104,41 +91,25 @@ pub trait ReactorDriver {
     fn capabilities(&self) -> DriverCapabilities;
 }
 
-/// Optional blocking wait contract used by host-loop wait paths.
-///
-/// Implement this trait for drivers that are used with runtime paths calling
-/// `ReactorRuntime::drain_or_wait` / host-loop wait helpers. Drivers that are
-/// only used in pure poll/tick mode may omit this trait.
+/// Blocking wait contract used by runtime paths that may block. Implement for drivers used
+/// with deadline-aware host loops; pure poll/tick drivers may omit it.
 pub trait ReactorDriverWait {
     type Error;
     type Readiness;
 
     /// Returns backend readiness metadata when available.
-    ///
-    /// Returning `None` is valid for drivers without explicit readiness handles.
     fn readiness(&self) -> Option<Self::Readiness>;
-    /// Waits until at least `min_events` may be available and returns how many
-    /// events became ready because of this wait operation.
-    ///
-    /// Return-count contract:
-    /// - `0` means the wait returned without making events ready.
-    /// - `n > 0` means this wait made `n` events ready for subsequent drains.
+
+    /// Waits until at least min_events may be available.
     fn wait(&mut self, min_events: usize) -> Result<usize, Self::Error>;
 
-    /// Waits like [`ReactorDriverWait::wait`], but returns no later than
-    /// `timeout_ns` from now when a timeout is given (used to honor timer
-    /// deadlines while IO-idle). Returning `Ok(0)` on timeout is expected.
-    ///
-    /// The default implementation ignores the timeout and blocks like
-    /// `wait`; drivers used with timer-driven runtimes must override it.
+    /// Waits no later than timeout_ns from now when a timeout is given.
+    /// Returns Ok(0) when the timeout expires without ready events.
     fn wait_deadline(
         &mut self,
         min_events: usize,
         timeout_ns: Option<u64>,
-    ) -> Result<usize, Self::Error> {
-        let _ = timeout_ns;
-        self.wait(min_events)
-    }
+    ) -> Result<usize, Self::Error>;
 }
 
 #[cfg(test)]
@@ -194,6 +165,9 @@ mod tests {
         fn wait(&mut self, _min_events: usize) -> Result<usize, Self::Error> {
             Ok(0)
         }
+
+        fn wait_deadline(&mut self, _min_events: usize, _timeout_ns: Option<u64>) -> Result<usize, Self::Error> { Ok(0) }
+
     }
 
     #[test]

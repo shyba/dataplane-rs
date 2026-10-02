@@ -158,12 +158,8 @@ fn bench_submit_poll_send_zero(c: &mut Criterion) {
                         let mut reactor =
                             UnifiedReactor::new(RING_ENTRIES, backend).expect("create reactor");
                         for _ in 0..*batch {
-                            let token = reactor
-                                .submit(NetOp::Send {
-                                    fd: tx_fd,
-                                    ptr: std::ptr::null(),
-                                    len: 0,
-                                })
+                            // SAFETY: zero-length send uses a live socket and a null pointer is unused.
+                            let token = unsafe { reactor.submit(NetOp::Send { fd: tx_fd, ptr: std::ptr::null(), len: 0 }) }
                                 .expect("submit send");
                             black_box(token);
                         }
@@ -312,30 +308,16 @@ fn drive_client_actor(
                 return;
             }
             pair.client_tx[0] = (pair.seq & 0xFF) as u8;
-            let token = submit_pair_op(
-                reactor,
-                NetOp::UdpSend {
-                    fd: pair.client_fd,
-                    ptr: pair.client_tx.as_ptr(),
-                    len: pair.client_tx.len(),
-                },
-                "submit pair client send",
-            );
+            // SAFETY: client_tx and client_fd remain valid through the send completion.
+            let token = unsafe { submit_pair_op(reactor, NetOp::UdpSend { fd: pair.client_fd, ptr: pair.client_tx.as_ptr(), len: pair.client_tx.len() }, "submit pair client send") };
             assert!(routes
                 .insert(token, Route::ClientSend { pair_id })
                 .is_none());
             pair.client_phase = PairPhase::WaitingSend;
         }
         PairPhase::ReadyRecv => {
-            let token = submit_pair_op(
-                reactor,
-                NetOp::UdpRecv {
-                    fd: pair.client_fd,
-                    ptr: pair.client_rx.as_mut_ptr(),
-                    len: pair.client_rx.len(),
-                },
-                "submit pair client recv",
-            );
+            // SAFETY: client_rx and client_fd remain valid and exclusively writable through completion.
+            let token = unsafe { submit_pair_op(reactor, NetOp::UdpRecv { fd: pair.client_fd, ptr: pair.client_rx.as_mut_ptr(), len: pair.client_rx.len() }, "submit pair client recv") };
             assert!(routes
                 .insert(token, Route::ClientRecv { pair_id })
                 .is_none());
@@ -354,30 +336,16 @@ fn drive_server_actor(
 ) {
     match pair.server_phase {
         ServerPhase::ReadyRecv => {
-            let token = submit_pair_op(
-                reactor,
-                NetOp::UdpRecv {
-                    fd: pair.server_fd,
-                    ptr: pair.server_rx.as_mut_ptr(),
-                    len: pair.server_rx.len(),
-                },
-                "submit pair server recv",
-            );
+            // SAFETY: server_rx and server_fd remain valid and exclusively writable through completion.
+            let token = unsafe { submit_pair_op(reactor, NetOp::UdpRecv { fd: pair.server_fd, ptr: pair.server_rx.as_mut_ptr(), len: pair.server_rx.len() }, "submit pair server recv") };
             assert!(routes
                 .insert(token, Route::ServerRecv { pair_id })
                 .is_none());
             pair.server_phase = ServerPhase::WaitingRecv;
         }
         ServerPhase::ReadySend => {
-            let token = submit_pair_op(
-                reactor,
-                NetOp::UdpSend {
-                    fd: pair.server_fd,
-                    ptr: pair.server_rx.as_ptr(),
-                    len: pair.last_server_recv,
-                },
-                "submit pair server send",
-            );
+            // SAFETY: server_rx and server_fd remain valid and readable through completion.
+            let token = unsafe { submit_pair_op(reactor, NetOp::UdpSend { fd: pair.server_fd, ptr: pair.server_rx.as_ptr(), len: pair.last_server_recv }, "submit pair server send") };
             assert!(routes
                 .insert(token, Route::ServerSend { pair_id })
                 .is_none());
@@ -456,7 +424,9 @@ fn handle_pair_completion(
 }
 
 #[cfg(target_os = "linux")]
-fn submit_pair_op(reactor: &mut BenchReactorHost, op: NetOp, context: &str) -> OpToken {
+unsafe fn submit_pair_op(reactor: &mut BenchReactorHost, op: NetOp, context: &str) -> OpToken {
+    // SAFETY: callers keep each pair's socket and operation buffers stable through completion.
+    let op = unsafe { dataplane_reactor::reactor::RawNetOp::new(op) };
     reactor
         .submit_and_flush(op, dataplane_core_reactor::wake_handle::WakeHandle::None)
         .unwrap_or_else(|err| panic!("{context}: {err}"))

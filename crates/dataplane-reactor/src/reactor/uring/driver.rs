@@ -1,7 +1,7 @@
 use crate::reactor::{
     DriverBackendKind, DriverCapabilities, EventContext, Handler, NetEvent, NetOp, NetOpKind,
-    NetSubscription, NetSubscriptionEvent, OpToken, Reactor, ReactorDriver, ReactorDriverWait,
-    SubscriptionToken,
+    NetSubscription, NetSubscriptionEvent, OpToken, RawNetOp, Reactor, ReactorDriver,
+    ReactorDriverWait, SubscriptionToken,
 };
 
 use super::entries::{cqe_more, send_entry};
@@ -13,7 +13,7 @@ use super::udp_batch::{fill_udp_batch_slot_from_multishot, UdpBatchMode};
 impl Reactor for UringReactor {
     type Error = std::io::Error;
 
-    fn submit(&mut self, op: NetOp) -> Result<OpToken, Self::Error> {
+    unsafe fn submit(&mut self, op: NetOp) -> Result<OpToken, Self::Error> {
         let raw = self.alloc_raw_token();
         let token = OpToken(raw);
         self.submit_with_token(op, token)?;
@@ -334,12 +334,13 @@ impl Reactor for UringReactor {
 impl ReactorDriver for UringReactor {
     type Error = std::io::Error;
     type Token = OpToken;
-    type Submit = NetOp;
+    type Submit = RawNetOp;
     type Event = NetEvent;
 
     fn submit(&mut self, op: Self::Submit, token: Self::Token) -> Result<(), Self::Error> {
-        self.submit_with_token(op, token)
+        self.submit_with_token(op.into_inner(), token)
     }
+
 
     fn flush(&mut self) -> Result<usize, Self::Error> {
         self.submit_pending()
@@ -350,7 +351,7 @@ impl ReactorDriver for UringReactor {
         F: FnMut(Self::Event),
     {
         let mut drained = self.drain_ready_events(max_events, &mut on_event);
-        let limit = max_events.max(1);
+        let limit = max_events;
         if drained >= limit {
             return Ok(drained);
         }
@@ -373,6 +374,7 @@ impl ReactorDriver for UringReactor {
             .values()
             .filter(|meta| matches!(meta.kind, TokenKind::Op(_)))
             .count()
+            + self.ready_events.len()
     }
 
     fn capabilities(&self) -> DriverCapabilities {

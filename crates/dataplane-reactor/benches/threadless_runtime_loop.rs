@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::time::Duration;
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
@@ -113,6 +114,19 @@ impl ReactorDriverWait for MockDriver {
     }
 
     fn wait(&mut self, _min_events: usize) -> Result<usize, Self::Error> {
+        Ok(self.ready.len())
+    }
+
+    fn wait_deadline(
+        &mut self,
+        min_events: usize,
+        timeout_ns: Option<u64>,
+    ) -> Result<usize, Self::Error> {
+        if self.ready.len() < min_events {
+            if let Some(timeout_ns) = timeout_ns {
+                std::thread::sleep(Duration::from_nanos(timeout_ns));
+            }
+        }
         Ok(self.ready.len())
     }
 }

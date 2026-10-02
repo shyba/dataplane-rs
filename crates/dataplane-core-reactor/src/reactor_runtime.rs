@@ -38,6 +38,7 @@ impl<D: ReactorDriver> ReactorRuntime<D> {
         self.driver.submit(op, token)
     }
 
+
     pub fn flush(&mut self) -> Result<usize, D::Error> {
         self.driver.flush()
     }
@@ -193,16 +194,17 @@ mod tests {
         fn wait(&mut self, min_events: usize) -> Result<usize, Self::Error> {
             self.wait_calls.push(min_events);
             if self.events.is_empty() {
-                self.events.push(NetEvent::OpComplete {
-                    token: OpToken(7),
-                    kind: crate::reactor_model::NetOpKind::Recv,
-                    result: 77,
-                    flags: 0,
-                });
+                self.events.push(NetEvent::OpComplete { token: OpToken(7), kind: crate::reactor_model::NetOpKind::Recv, result: 77, flags: 0 });
             }
             Ok(self.events.len())
         }
+
+        fn wait_deadline(&mut self, min_events: usize, _timeout_ns: Option<u64>) -> Result<usize, Self::Error> {
+            self.wait(min_events)
+        }
+
     }
+
 
     #[test]
     fn drain_buffers_overflow_events() {
@@ -243,16 +245,7 @@ mod tests {
         let driver = DummyDriver::default();
         let mut runtime = ReactorRuntime::new(driver);
         let token = OpToken(42);
-        runtime
-            .submit(
-                NetOp::Send {
-                    fd: 0,
-                    ptr: std::ptr::null(),
-                    len: 0,
-                },
-                token,
-            )
-            .unwrap();
+        runtime.submit(NetOp::Send { fd: 0, ptr: std::ptr::null(), len: 0 }, token).unwrap();
 
         assert_eq!(runtime.driver().submitted.len(), 1);
         assert_eq!(runtime.driver().submitted[0].1, token);

@@ -7,7 +7,7 @@ use dataplane_core_reactor::balanced_profile::{EmbeddedParkStore, EmbeddedTimerS
 use dataplane_core_reactor::native_task::{NativeTask, NativeTaskCx, StepResult};
 use dataplane_core_reactor::reactor_model::ReactorCompletion;
 use dataplane_reactor::reactor::adaptive::{ReactorBackend, UnifiedReactor};
-use dataplane_reactor::reactor::{NetOp, NetOpKind, OpToken, UdpRecvSlot};
+use dataplane_reactor::reactor::{NetOp, NetOpKind, OpToken, RawNetOp, UdpRecvSlot};
 use dataplane_runtime::runtime_profiles::{
     dispatch_profiled_runtime_loop_from_profile_with_policy, BalancedRecordingHostPolicy,
     BalancedRuntime, RuntimeLoop, RuntimeLoopHandle, TopologyProfile,
@@ -440,7 +440,7 @@ fn run_shared_server_reactor_with_runtime<R>(
     expected_requests: usize,
 ) -> usize
 where
-    R: RuntimeLoop<Error = std::io::Error, Submit = NetOp, Token = OpToken>,
+    R: RuntimeLoop<Error = std::io::Error, Submit = RawNetOp, Token = OpToken>,
 {
     run_shared_server_reactor_with_runtime_loop(
         reactor,
@@ -483,7 +483,7 @@ fn run_shared_server_reactor_with_runtime_loop<R>(
     expected_requests: usize,
 ) -> usize
 where
-    R: RuntimeLoop<Error = std::io::Error, Submit = NetOp, Token = OpToken>,
+    R: RuntimeLoop<Error = std::io::Error, Submit = RawNetOp, Token = OpToken>,
 {
     let owner = ServerIngressOwner::new(
         reactor,
@@ -505,7 +505,7 @@ where
 
 struct ServerIngressOwner<R>
 where
-    R: RuntimeLoop<Error = std::io::Error, Submit = NetOp, Token = OpToken>,
+    R: RuntimeLoop<Error = std::io::Error, Submit = RawNetOp, Token = OpToken>,
 {
     reactor: RuntimeLoopHandle<R>,
     fd: RawFd,
@@ -519,7 +519,7 @@ where
 
 impl<R> ServerIngressOwner<R>
 where
-    R: RuntimeLoop<Error = std::io::Error, Submit = NetOp, Token = OpToken>,
+    R: RuntimeLoop<Error = std::io::Error, Submit = RawNetOp, Token = OpToken>,
 {
     fn new(
         reactor: RuntimeLoopHandle<R>,
@@ -565,13 +565,14 @@ where
             .reactor
             .submit_if_idle(
                 &mut self.batch_token,
-                NetOp::UdpRecvBatch {
+                // SAFETY: the server owns the fd, slots, and backing buffers until completion.
+                unsafe { RawNetOp::new(NetOp::UdpRecvBatch {
                     fd: self.fd,
                     slots_ptr: self.slots.as_mut_ptr(),
                     slots_len: self.slots.len(),
                     flags: libc::MSG_DONTWAIT,
                     prefer_multishot: matches!(self.recv_mode, ServerRecvMode::MsgMultishot),
-                },
+                }) },
                 dataplane_core_reactor::wake_handle::WakeHandle::None,
             )
             .expect("submit udp recv batch");
@@ -614,14 +615,14 @@ where
 
 struct ServerPump<R>
 where
-    R: RuntimeLoop<Error = std::io::Error, Submit = NetOp, Token = OpToken>,
+    R: RuntimeLoop<Error = std::io::Error, Submit = RawNetOp, Token = OpToken>,
 {
     owner: ServerIngressOwner<R>,
 }
 
 impl<R> ServerPump<R>
 where
-    R: RuntimeLoop<Error = std::io::Error, Submit = NetOp, Token = OpToken>,
+    R: RuntimeLoop<Error = std::io::Error, Submit = RawNetOp, Token = OpToken>,
 {
     fn new(owner: ServerIngressOwner<R>) -> Self {
         Self { owner }

@@ -418,7 +418,7 @@ impl UringReactor {
         F: FnMut(NetEvent),
     {
         let mut drained = 0usize;
-        let limit = max_events.max(1);
+        let limit = max_events;
         while drained < limit {
             let Some(event) = self.ready_events.pop_front() else {
                 break;

@@ -1,3 +1,18 @@
+//! Reactor-independent execution, scheduling, and wake routing.
+//!
+//! Start with `native_task` for cooperative state-machine tasks and `host_loop`
+//! for driver completion routing. `balanced_profile` composes those pieces with
+//! explicit timer/park storage and host policy; `local_scheduler` is the separate
+//! mesh/offload scheduler. They are not interchangeable execution engines.
+//!
+//! Feature boundaries:
+//! - `host-core` (default): host scheduling, profiles, drivers and mailbox futures.
+//! - `rp2040-compile`: allocator-backed local execution/future primitives only.
+//! - `noalloc`: fixed-capacity primitives, with no allocator or OS dependency.
+//!
+//! Work-count budgets do not preempt callbacks or establish wall-time deadlines.
+//! Generation tokens reject stale references until their documented integer wrap
+//! bound; raw-buffer driver operations retain caller-owned lifetime obligations.
 #![cfg_attr(target_os = "none", no_std)]
 
 #[cfg(any(feature = "host-core", feature = "rp2040-compile"))]

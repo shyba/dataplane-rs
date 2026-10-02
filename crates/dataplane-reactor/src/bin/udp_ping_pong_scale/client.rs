@@ -6,7 +6,7 @@ use std::time::Instant;
 use dataplane_core_reactor::local_exec::LocalExec;
 use dataplane_core_reactor::native_task::{NativeTask, NativeTaskCx, StepResult};
 use dataplane_reactor::reactor::adaptive::{ReactorBackend, UnifiedReactor};
-use dataplane_reactor::reactor::{NetOp, OpToken};
+use dataplane_reactor::reactor::{NetOp, OpToken, RawNetOp};
 use dataplane_runtime::runtime_profiles::{
     dispatch_profiled_runtime_loop_from_profile_with_policy, BalancedRecordingHostPolicy,
     RuntimeLoop, RuntimeLoopHandle, TopologyProfile,
@@ -106,7 +106,7 @@ fn run_shard_with_runtime<R>(
     server_addr: SocketAddr,
 ) -> RunStats
 where
-    R: RuntimeLoop<Error = std::io::Error, Submit = NetOp, Token = OpToken>,
+    R: RuntimeLoop<Error = std::io::Error, Submit = RawNetOp, Token = OpToken>,
 {
     run_shard_with_runtime_loop(
         reactor,
@@ -145,7 +145,7 @@ fn run_shard_with_runtime_loop<R>(
     server_addr: SocketAddr,
 ) -> RunStats
 where
-    R: RuntimeLoop<Error = std::io::Error, Submit = NetOp, Token = OpToken>,
+    R: RuntimeLoop<Error = std::io::Error, Submit = RawNetOp, Token = OpToken>,
 {
     ShardSession::new(
         reactor,
@@ -159,7 +159,7 @@ where
 
 struct ShardSession<R>
 where
-    R: RuntimeLoop<Error = std::io::Error, Submit = NetOp, Token = OpToken>,
+    R: RuntimeLoop<Error = std::io::Error, Submit = RawNetOp, Token = OpToken>,
 {
     runtime: ClientShardRuntime<R>,
     ready: LocalExec<usize>,
@@ -170,7 +170,7 @@ where
 
 impl<R> ShardSession<R>
 where
-    R: RuntimeLoop<Error = std::io::Error, Submit = NetOp, Token = OpToken>,
+    R: RuntimeLoop<Error = std::io::Error, Submit = RawNetOp, Token = OpToken>,
 {
     fn new(
         reactor: RuntimeLoopHandle<R>,
@@ -188,7 +188,7 @@ where
                 payload_len,
                 rounds_per_pair,
             ));
-            ready.push(pair_id, pair_id);
+            ready.push(pair_id, pair_id).expect("pair id is a configured ready slot");
         }
 
         Self {
@@ -287,7 +287,7 @@ enum InflightRoute {
 
 struct ClientShardRuntime<R>
 where
-    R: RuntimeLoop<Error = std::io::Error, Submit = NetOp, Token = OpToken>,
+    R: RuntimeLoop<Error = std::io::Error, Submit = RawNetOp, Token = OpToken>,
 {
     reactor: RuntimeLoopHandle<R>,
     routes: HashMap<OpToken, InflightRoute>,
@@ -295,7 +295,7 @@ where
 
 impl<R> ClientShardRuntime<R>
 where
-    R: RuntimeLoop<Error = std::io::Error, Submit = NetOp, Token = OpToken>,
+    R: RuntimeLoop<Error = std::io::Error, Submit = RawNetOp, Token = OpToken>,
 {
     fn new(reactor: RuntimeLoopHandle<R>, pairs_per_shard: usize) -> Self {
         Self {
@@ -317,14 +317,15 @@ where
                 }
 
                 pair.tx_buf[0] = (pair.seq & 0xFF) as u8;
-                let send_token = self.submit_client_op(
+                // SAFETY: pair.tx_buf and its fd stay valid until the send completion.
+                let send_token = unsafe { self.submit_client_op(
                     NetOp::UdpSend {
                         fd: pair.fd,
                         ptr: pair.tx_buf.as_ptr(),
                         len: pair.tx_buf.len(),
                     },
                     "submit client send",
-                );
+                ) };
                 assert!(
                     self.routes
                         .insert(
@@ -342,14 +343,15 @@ where
                 } else {
                     pair.send_inflight.push(send_token);
                     pair.max_send_inflight = pair.max_send_inflight.max(pair.send_inflight.len());
-                    let recv_token = self.submit_client_op(
+                    // SAFETY: pair.rx_buf and fd stay valid and exclusive until completion.
+                    let recv_token = unsafe { self.submit_client_op(
                         NetOp::UdpRecv {
                             fd: pair.fd,
                             ptr: pair.rx_buf.as_mut_ptr(),
                             len: pair.rx_buf.len(),
                         },
                         "submit client recv",
-                    );
+                    ) };
                     assert!(
                         self.routes
                             .insert(
@@ -365,14 +367,15 @@ where
                 }
             }
             ClientRequestPhase::ReadyToRecv => {
-                let recv_token = self.submit_client_op(
+                // SAFETY: pair.rx_buf and fd stay valid and exclusive until completion.
+                let recv_token = unsafe { self.submit_client_op(
                     NetOp::UdpRecv {
                         fd: pair.fd,
                         ptr: pair.rx_buf.as_mut_ptr(),
                         len: pair.rx_buf.len(),
                     },
                     "submit client recv",
-                );
+                ) };
                 assert!(
                     self.routes
                         .insert(
@@ -393,7 +396,9 @@ where
         }
     }
 
-    fn submit_client_op(&mut self, op: NetOp, context: &str) -> OpToken {
+    unsafe fn submit_client_op(&mut self, op: NetOp, context: &str) -> OpToken {
+        // SAFETY: each caller retains the operation resources through its completion.
+        let op = unsafe { dataplane_reactor::reactor::RawNetOp::new(op) };
         self.reactor
             .submit_and_flush_token(op, dataplane_core_reactor::wake_handle::WakeHandle::None)
             .unwrap_or_else(|err| panic!("{context}: {err}"))
@@ -436,7 +441,7 @@ where
                 }
                 if uring_send_wait {
                     pair.phase = ClientRequestPhase::ReadyToRecv;
-                    ready.push(pair_id, pair_id);
+                    ready.push(pair_id, pair_id).expect("pair id is a configured ready slot");
                 } else if matches!(pair.phase, ClientRequestPhase::Draining)
                     && pair.send_inflight.is_empty()
                 {
@@ -462,7 +467,7 @@ where
                 pair.seq += 1;
                 if pair.seq < pair.rounds {
                     pair.phase = ClientRequestPhase::ReadyToSend;
-                    ready.push(pair_id, pair_id);
+                    ready.push(pair_id, pair_id).expect("pair id is a configured ready slot");
                 } else if pair.send_inflight.is_empty() {
                     Self::finish_request(pair, completed_pairs);
                 } else {
@@ -488,7 +493,7 @@ fn drive_host_runtime_step<R>(
     idle: bool,
 ) -> HostRuntimeStep
 where
-    R: RuntimeLoop<Error = std::io::Error, Submit = NetOp, Token = OpToken>,
+    R: RuntimeLoop<Error = std::io::Error, Submit = RawNetOp, Token = OpToken>,
 {
     let tick = reactor
         .tick_completions_or_wait(
