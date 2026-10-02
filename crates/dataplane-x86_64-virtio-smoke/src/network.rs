@@ -253,7 +253,7 @@ struct UdpBenchRequest {
 }
 
 #[cfg(feature = "udp-bench")]
-pub(crate) fn validate_udp_bench_request(
+fn validate_udp_bench_request(
     region: &[u8; NET_TASK_BYTES],
     len: u32,
 ) -> Result<UdpBenchRequest, FailReason> {

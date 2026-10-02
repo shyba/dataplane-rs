@@ -1,3 +1,8 @@
+//! Sector-rotating flash pages with CRC validation and a commit bitmap.
+//!
+//! Geometry is validated before recovery touches flash. The caller owns flash
+//! exclusion, power-loss handling, and re-recovery after a failed append. CRC
+//! detects corruption; it is not an authentication mechanism.
 use core::cmp;
 
 pub const FLASH_PAGE_SIZE: usize = 256;
@@ -44,6 +49,29 @@ impl Geometry {
         }
     }
 
+    /// Validate non-overlapping, sector-aligned regions and bounded arithmetic.
+    pub fn validate(self) -> Result<(), FlashError> {
+        if self.page_count == 0
+            || !self.page_count.is_multiple_of(PAGES_PER_SECTOR)
+            || self.page_count > ALLOCATOR_BYTES * 8
+            || !self.allocator_offset.is_multiple_of(FLASH_SECTOR_SIZE)
+            || !self.data_offset.is_multiple_of(FLASH_SECTOR_SIZE)
+        {
+            return Err(FlashError::OutOfBounds);
+        }
+        let allocator_end = self.allocator_offset.checked_add(ALLOCATOR_BYTES)
+            .ok_or(FlashError::OutOfBounds)?;
+        let data_bytes = self.page_count.checked_mul(FLASH_PAGE_SIZE)
+            .ok_or(FlashError::OutOfBounds)?;
+        let data_end = self.data_offset.checked_add(data_bytes)
+            .ok_or(FlashError::OutOfBounds)?;
+        if self.allocator_offset < data_end && self.data_offset < allocator_end {
+            return Err(FlashError::OutOfBounds);
+        }
+        Ok(())
+    }
+
+    /// Offset for an in-range slot of an already validated geometry.
     pub const fn page_offset(self, slot: usize) -> usize {
         self.data_offset + slot * FLASH_PAGE_SIZE
     }
@@ -93,6 +121,7 @@ pub struct RollingLog {
 
 impl RollingLog {
     pub fn recover<F: Flash>(flash: &F, geometry: Geometry) -> Result<Self, FlashError> {
+        geometry.validate()?;
         let mut recovery = Recovery::empty();
 
         for slot in 0..geometry.page_count {
@@ -143,7 +172,7 @@ impl RollingLog {
     ) -> Result<(), FlashError> {
         let slot = self.recovery.next_slot;
 
-        if slot % PAGES_PER_SECTOR == 0 {
+        if slot.is_multiple_of(PAGES_PER_SECTOR) {
             flash.erase_sector(self.geometry.data_sector_offset(slot))?;
         }
 
@@ -572,6 +601,24 @@ mod tests {
                     prop_assert_eq!(sink.pages, expected);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn invalid_geometry_is_rejected_without_touching_flash() {
+        let mut flash = ModelFlash::new();
+        flash.bytes.fill(0x5a);
+        for geometry in [
+            Geometry::new(0, ALLOCATOR_BYTES, 0),
+            Geometry::new(0, ALLOCATOR_BYTES, 1),
+            Geometry::new(0, 0, TEST_PAGES),
+            Geometry::new(1, ALLOCATOR_BYTES, TEST_PAGES),
+            Geometry::new(0, ALLOCATOR_BYTES + 1, TEST_PAGES),
+            Geometry::new(0, usize::MAX - (FLASH_SECTOR_SIZE - 1), TEST_PAGES),
+            Geometry::new(0, ALLOCATOR_BYTES, ALLOCATOR_BYTES * 8 + PAGES_PER_SECTOR),
+        ] {
+            assert_eq!(RollingLog::recover_or_initialize(&mut flash, geometry), Err(FlashError::OutOfBounds));
+            assert!(flash.bytes.iter().all(|&b| b == 0x5a));
         }
     }
 

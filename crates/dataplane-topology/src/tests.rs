@@ -153,3 +153,31 @@ fn profile_to_shard_group_matches_topology_shard_count() {
     let group = profile.to_shard_group().expect("group from profile");
     assert_eq!(group.shard_count(), profile.shard_count);
 }
+
+#[test]
+fn every_placement_and_fallback_preserves_explicit_allowlist() {
+    // A nonexistent host CPU forces hwloc discovery to fail deterministically.
+    // Resolution is planning only; no attempt is made to pin to this CPU.
+    let cpu = usize::MAX / 2;
+    for placement in [
+        TopologyPlacementPolicy::Auto,
+        TopologyPlacementPolicy::CoreAffinity,
+        TopologyPlacementPolicy::GenericRoundRobin,
+        TopologyPlacementPolicy::Hwloc {
+            domain: HwlocDomainPreference::L3,
+        },
+    ] {
+        for fallback in [
+            TopologyFallbackPolicy::Auto,
+            TopologyFallbackPolicy::Ordered(vec![TopologyStrategy::GenericRoundRobin]),
+            TopologyFallbackPolicy::Ordered(vec![TopologyStrategy::CoreAffinityRoundRobin]),
+        ] {
+            let mut profile = TopologyProfile::balanced_dual_shard().with_shard_count(3);
+            profile.cpu_allowlist = Some(vec![cpu, cpu]);
+            profile.placement = placement.clone();
+            profile.fallback = fallback;
+            let resolved = profile.resolve().unwrap();
+            assert_eq!(resolved.topology.cpu_plan(), vec![cpu; 3]);
+        }
+    }
+}

@@ -49,6 +49,12 @@ impl<K> LocalExec<K> {
         self.pending
     }
 
+    /// Visit at most `runnable_budget` slots, rotating unfinished slots to the back.
+    /// A slot may be revisited in the same call. `drain_session` ignores the
+    /// per-visit item budget and drains each selected slot completely.
+    ///
+    /// Callbacks must not unwind: after a callback panic, discard this executor.
+    /// Pending work in the current slot may no longer be scheduled.
     pub fn drain<F>(
         &mut self,
         runnable_budget: usize,

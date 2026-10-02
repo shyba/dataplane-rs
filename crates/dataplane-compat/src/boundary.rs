@@ -48,6 +48,9 @@ pub struct BatchReply {
     pub results: Vec<(u64, BatchResult)>,
 }
 
+/// Runtime-neutral batch submission. Successful replies correlate one result per
+/// unique operation id; [`validate_reply`] checks this contract in adapter tests.
+/// Queue capacity, admission timing and cancellation semantics are adapter-owned.
 pub trait BoundaryAdapter {
     type ReplyFuture: Future<Output = BoundaryResult<BatchReply>> + Send;
 
@@ -90,12 +93,12 @@ impl std::fmt::Display for BatchConformanceError {
 impl std::error::Error for BatchConformanceError {}
 
 fn result_matches_op(op: &BatchOp, result: &BatchResult) -> bool {
-    match (op, result) {
-        (_, BatchResult::Error(_)) => true,
-        (BatchOp::Read { .. }, BatchResult::Data(_)) => true,
-        (BatchOp::Write { .. }, BatchResult::Ok) => true,
-        _ => false,
-    }
+    matches!(
+        (op, result),
+        (_, BatchResult::Error(_))
+            | (BatchOp::Read { .. }, BatchResult::Data(_))
+            | (BatchOp::Write { .. }, BatchResult::Ok)
+    )
 }
 
 /// Check a reply against the batch it answers, enforcing the boundary contract that
@@ -103,8 +106,9 @@ fn result_matches_op(op: &BatchOp, result: &BatchResult) -> bool {
 /// with a corresponding id, no result is unknown or duplicated, and each result kind
 /// is valid for its op kind.
 ///
-/// Cheap (`O(ops + results)`); call it on the reply path in debug builds, and drive
-/// adapter test suites through it as the conformance harness.
+/// Expected `O(ops + results)` time with two temporary hash collections. Intended
+/// for adapter conformance tests or optional debug checks, not mandatory hot-path
+/// validation. This checks correlation and result kinds, not transport semantics.
 pub fn validate_reply(
     batch: &SessionBatch,
     reply: &BatchReply,
@@ -188,7 +192,10 @@ mod conformance {
             session_id: 42,
             ops: vec![
                 BatchOp::Read { id: 1, len: 8 },
-                BatchOp::Write { id: 2, data: vec![0xAB] },
+                BatchOp::Write {
+                    id: 2,
+                    data: vec![0xAB],
+                },
             ],
         }
     }
@@ -220,10 +227,7 @@ mod conformance {
 
     #[test]
     fn out_of_order_results_pass() {
-        let ok = reply(vec![
-            (2, BatchResult::Ok),
-            (1, BatchResult::Data(vec![9])),
-        ]);
+        let ok = reply(vec![(2, BatchResult::Ok), (1, BatchResult::Data(vec![9]))]);
         assert_eq!(validate_reply(&batch(), &ok), Ok(()));
     }
 

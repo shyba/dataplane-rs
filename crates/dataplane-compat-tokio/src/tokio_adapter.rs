@@ -9,6 +9,11 @@ use tokio::sync::oneshot;
 
 type BoxReplyFuture = Pin<Box<dyn Future<Output = BoundaryResult<BatchReply>> + Send + 'static>>;
 
+/// Nonblocking admission to an implementation-owned batch queue.
+///
+/// The sink must return promptly, enforce its own capacity, and eventually send
+/// a reply or drop the sender. Dropping the caller's future does not cancel an
+/// already admitted batch; failure to deliver its reply must not panic.
 pub trait TokioBatchSink: Send + Sync + 'static {
     fn submit_batch(
         &self,
@@ -17,9 +22,17 @@ pub trait TokioBatchSink: Send + Sync + 'static {
     ) -> BoundaryResult<()>;
 }
 
-#[derive(Clone)]
+/// Lazy batch submission: the sink is called when the returned future is polled.
 pub struct TokioBoundaryAdapter<S> {
     sink: Arc<S>,
+}
+
+impl<S> Clone for TokioBoundaryAdapter<S> {
+    fn clone(&self) -> Self {
+        Self {
+            sink: Arc::clone(&self.sink),
+        }
+    }
 }
 
 impl<S> TokioBoundaryAdapter<S> {
@@ -47,9 +60,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use dataplane_compat::boundary::{
-        validate_reply, BatchConformanceError, BatchOp, BatchResult,
-    };
+    use dataplane_compat::boundary::{validate_reply, BatchConformanceError, BatchOp, BatchResult};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct ImmediateSink {
@@ -113,6 +124,14 @@ mod tests {
             session_id: 7,
             ops: vec![BatchOp::Read { id: 1, len: 16 }],
         }
+    }
+
+    #[test]
+    fn cloning_adapter_does_not_require_cloning_sink() {
+        let sink = Arc::new(ClosedSink);
+        let adapter = TokioBoundaryAdapter::new(Arc::clone(&sink));
+        let cloned = adapter.clone();
+        assert!(Arc::ptr_eq(&adapter.sink, &cloned.sink));
     }
 
     #[test]

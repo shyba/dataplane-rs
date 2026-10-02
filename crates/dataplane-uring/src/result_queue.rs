@@ -3,23 +3,16 @@
 //! Extracts ResultEvent, ResultReduceState, ResultBatchSlot, and ResultReduceTrigger
 //! from runtime.rs to enable independent evolution of result batching logic.
 //!
-//! Also provides `ResultFacet`, a private view struct that aggregates result queue
-//! state and exposes a stable read-only interface to result queue predicates.
+//! [`ResultFacet`] snapshots scalar queue state for read-only scheduling queries.
+//! Predicates do not mutate queues; the embedding runtime owns admission limits
+//! and applies the resulting scheduling actions.
 
 use std::collections::VecDeque;
 
 
-/// Private view struct for result queue state on ShardState.
-///
-/// Aggregates the result-related fields from ShardState and exposes result queue
-/// predicates without exposing the full ShardState struct. This is the first
-/// ResultFacet slice — a narrow, owned interface over result-related state.
-///
-/// Constructed via `ResultFacet::new(...)` at the call site that needs to inspect
-/// result queue state.
-///
-/// NOTE: This type is private to the native runtime crate.
-/// Do not widen its visibility beyond what current call sites require.
+/// Public, owned snapshot of an embedding runtime's result-queue state.
+/// Construct a fresh snapshot when queue state changes; this value holds no
+/// references and does not track subsequent mutations.
 pub struct ResultFacet {
     result_direct_send: bool,
     pending_len: usize,

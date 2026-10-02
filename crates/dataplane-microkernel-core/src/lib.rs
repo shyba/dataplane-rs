@@ -1,3 +1,9 @@
+//! Fixed-capacity message, task-table, and network-frame vocabulary for smoke kernels.
+//!
+//! No allocator, hardware access, scheduling policy, or transport implementation
+//! lives here. Constructors validate frame ranges; public wire-like descriptor
+//! fields are not a substitute for validating untrusted input at a driver boundary.
+//! Mailboxes return the original message on capacity exhaustion, including at zero capacity.
 #![no_std]
 #![forbid(unsafe_code)]
 
@@ -582,7 +588,9 @@ impl<const N: usize> TaskTable<N> {
         Ok(&self.slots[index])
     }
 
-    pub fn get_mut(&mut self, id: TaskId) -> Result<&mut TaskSlot, TaskTableError> {
+    // Raw mutable access would let callers change Empty/id without updating
+    // active_count. Expose state changes through the table's methods instead.
+    fn get_mut(&mut self, id: TaskId) -> Result<&mut TaskSlot, TaskTableError> {
         let index = self.index(id)?;
         if self.slots[index].status == TaskStatus::Empty {
             return Err(TaskTableError::Empty(id));
@@ -590,7 +598,13 @@ impl<const N: usize> TaskTable<N> {
         Ok(&mut self.slots[index])
     }
 
+    /// Change a live task's state. Setting `Empty` removes the task and updates
+    /// the active count, exactly as [`Self::remove`] does.
     pub fn set_status(&mut self, id: TaskId, status: TaskStatus) -> Result<(), TaskTableError> {
+        if status == TaskStatus::Empty {
+            self.remove(id)?;
+            return Ok(());
+        }
         self.get_mut(id)?.status = status;
         Ok(())
     }

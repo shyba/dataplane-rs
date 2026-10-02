@@ -1,4 +1,5 @@
 [package]
+license.workspace = true
 name = "dataplane-core-reactor-alloc"
 version = "0.1.0"
 edition = "2021"
@@ -8,3 +9,8 @@ default = []
 
 [dev-dependencies]
 proptest = "1"
+criterion = "0.5"
+
+[[bench]]
+name = "local_exec"
+harness = false

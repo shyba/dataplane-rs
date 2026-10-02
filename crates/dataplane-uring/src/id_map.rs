@@ -10,7 +10,8 @@ use std::hash::{BuildHasherDefault, Hasher};
 /// Fast hasher for u64 keys, used as the build-hasher for runtime shard maps.
 ///
 /// This avoids the default SipHash overhead for the typical case where keys are
-/// uniformly distributed u64 values.
+/// uniformly distributed u64 values. This is an identity hash, not HashDoS
+/// protection: use only runtime-generated ids, never attacker-chosen keys.
 #[derive(Default)]
 pub struct U64Hasher(u64);
 

@@ -9,6 +9,18 @@ deterministic RNDIS-wrapped Ethernet probe frame through the Raspi3B DWC2 USB
 host from its own protected page. The runner verifies that QEMU's net backend
 captured the expected frame bytes.
 
+## Reading the code
+
+`orchestration.rs` drives fixed-capacity region work; `mmu.rs` changes page
+permissions; `ethernet/driver/phase_*.rs` spells out USB/RNDIS sequencing;
+`vm_uart.rs` validates UART progress. Keep phase dispatch explicit rather than
+hiding register sequencing inside macros.
+
+Safety assumptions: only the boot CPU runs the orchestrator, region access is
+not reentrant, and page tables/DMA buffers use the configured identity mapping.
+RNDIS transmit is a fixed diagnostic probe, not an arbitrary-payload driver.
+The runner owns a wall-clock timeout; iteration budgets are not hardware deadlines.
+
 ## Architecture
 
 - Boots at `0x80000`, parks secondary cores, drops from EL3 to EL2, installs an
@@ -36,6 +48,12 @@ captured the expected frame bytes.
   with process status zero.
 
 ## Validation
+
+Compile-only check (does not validate MMU/device behavior):
+
+```sh
+cargo check -p dataplane-raspi3b-mmu-smoke --features bare-metal-bin --target aarch64-unknown-none
+```
 
 Run:
 

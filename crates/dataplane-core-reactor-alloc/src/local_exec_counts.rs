@@ -37,13 +37,16 @@ impl LocalExecCounts {
             return Err(PushCountError::BadSlot);
         };
         let was_empty = *per_slot == 0;
-        *per_slot = per_slot
+        let next_slot = per_slot
             .checked_add(count)
             .ok_or(PushCountError::Overflow)?;
-        self.pending = self
+        let next_pending = self
             .pending
             .checked_add(count)
             .ok_or(PushCountError::Overflow)?;
+        // Commit only after both checks succeed: errors must preserve all state.
+        *per_slot = next_slot;
+        self.pending = next_pending;
         if was_empty && !self.enqueued[slot] {
             self.enqueued[slot] = true;
             self.runnable.push_back(slot);
@@ -59,6 +62,12 @@ impl LocalExecCounts {
         self.pending
     }
 
+    /// Visit at most `runnable_budget` slots, rotating unfinished slots to the back.
+    /// A slot may be revisited in the same call. `drain_session` ignores the
+    /// per-visit item budget and drains each selected slot completely.
+    ///
+    /// Callbacks must not unwind: after a callback panic, discard this executor.
+    /// Pending work in the current slot may no longer be scheduled.
     pub fn drain<F>(
         &mut self,
         runnable_budget: usize,
@@ -163,6 +172,42 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn overflow_preserves_all_state() {
+        for slot in [0, 1] {
+            let mut exec = LocalExecCounts::new(2);
+            exec.push_count(0, usize::MAX).unwrap();
+            let before = (
+                exec.pending_per_slot.clone(),
+                exec.runnable.clone(),
+                exec.enqueued.clone(),
+                exec.pending,
+            );
+            assert_eq!(
+                exec.push_count(slot, 1),
+                Err(super::PushCountError::Overflow)
+            );
+            assert_eq!(
+                (
+                    exec.pending_per_slot,
+                    exec.runnable,
+                    exec.enqueued,
+                    exec.pending
+                ),
+                before
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_slot_preserves_state_and_zero_remains_a_noop() {
+        let mut exec = LocalExecCounts::new(0);
+        assert_eq!(exec.push_count(0, 1), Err(super::PushCountError::BadSlot));
+        assert_eq!(exec.push_count(usize::MAX, 0), Ok(()));
+        assert_eq!(exec.pending(), 0);
+        assert!(exec.runnable.is_empty());
     }
 
     #[test]

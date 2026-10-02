@@ -1,3 +1,8 @@
+//! QEMU microbit (nRF51/Cortex-M0) execution and SysTick smoke test.
+//! Semihosting exits success only after fixed-capacity and timer assertions pass.
+//! Optional `uart-sessions` expects the bounded scripted workload supplied by
+//! `tools/qemu_cortexm0_uart_sessions_run.sh`, not arbitrary network input.
+//! The runner owns the wall-clock timeout; WFI/MMIO waits are not real-time deadlines.
 #![cfg_attr(target_os = "none", no_std)]
 #![cfg_attr(target_os = "none", no_main)]
 
@@ -57,13 +62,17 @@ mod nrf51 {
 
     #[inline(always)]
     fn write32(addr: usize, value: u32) {
-        // MMIO is inherently unsafe; keep raw volatile access isolated here.
+        // SAFETY: callers in this private module use aligned nRF51 UART/GPIO
+        // register addresses mapped by the QEMU microbit machine; no RAM references
+        // alias these device registers.
         unsafe { core::ptr::write_volatile(addr as *mut u32, value) };
     }
 
     #[inline(always)]
     fn read32(addr: usize) -> u32 {
-        // MMIO is inherently unsafe; keep raw volatile access isolated here.
+        // SAFETY: callers in this private module use aligned nRF51 UART/GPIO
+        // register addresses mapped by the QEMU microbit machine; no RAM references
+        // alias these device registers.
         unsafe { core::ptr::read_volatile(addr as *const u32) }
     }
 

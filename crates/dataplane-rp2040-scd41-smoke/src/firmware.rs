@@ -5,6 +5,7 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
+use dataplane_rp2040_scd41_smoke::formatting::F32_2;
 use dataplane_rp2040_scd41_smoke::rolling_log::{
     Flash, FlashError, Geometry, RAW_MEASUREMENT_BYTES, RECORD_PAYLOAD_BYTES, RECORDS_PER_PAGE,
     RollingLog,
@@ -455,17 +456,6 @@ impl Write for SerialLogger<'_> {
     }
 }
 
-struct F32_2(f32);
-
-impl fmt::Display for F32_2 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let scaled = (self.0 * 100.0) as i32;
-        let whole = scaled / 100;
-        let frac = (scaled % 100).abs();
-        write!(f, "{whole}.{frac:02}")
-    }
-}
-
 struct MeasurementPageBuilder {
     payload: [u8; RECORD_PAYLOAD_BYTES],
     count: usize,
@@ -509,6 +499,8 @@ impl Flash for Rp2040Flash {
         }
 
         let src = (0x1000_0000usize + offset) as *const u8;
+        // SAFETY: the checked range lies in the 2 MiB XIP mapping; `out` is
+        // separate writable RAM. Flash operations are serialized on core 0.
         unsafe {
             core::ptr::copy_nonoverlapping(src, out.as_mut_ptr(), out.len());
         }
@@ -619,6 +611,8 @@ fn measurement_from_raw(raw: RawSensorData) -> SensorData {
 
 fn flash_slice(offset: usize, len: usize) -> &'static [u8] {
     let src = (0x1000_0000usize + offset) as *const u8;
+    // SAFETY: the private caller supplies an in-range page and consumes this
+    // view before programming. Core 1 is never started; no concurrent writer exists.
     unsafe { core::slice::from_raw_parts(src, len) }
 }
 
@@ -629,6 +623,9 @@ fn program_flash_page(offset: usize, page: &[u8; 256]) {
     let flash_flush_cache = hal::rom_data::flash_flush_cache::ptr();
     let flash_enter_cmd_xip = hal::rom_data::flash_enter_cmd_xip::ptr();
 
+    // SAFETY: validated page-aligned flash offset and a full page in RAM; ROM
+    // entry points stay callable with XIP off. Interrupts are masked and core 1
+    // is inactive. The RAM helper restores XIP before returning to flash code.
     cortex_m::interrupt::free(|_| unsafe {
         program_flash_page_from_ram(
             connect_internal_flash,
@@ -650,6 +647,9 @@ fn erase_flash_sector(offset: usize) {
     let flash_flush_cache = hal::rom_data::flash_flush_cache::ptr();
     let flash_enter_cmd_xip = hal::rom_data::flash_enter_cmd_xip::ptr();
 
+    // SAFETY: caller validated sector alignment/range; ROM calls and the RAM
+    // helper remain executable with XIP disabled. Interrupts are masked, core 1
+    // is inactive, and XIP is restored before returning.
     cortex_m::interrupt::free(|_| unsafe {
         erase_flash_sector_from_ram(
             connect_internal_flash,
@@ -675,6 +675,8 @@ unsafe fn program_flash_page_from_ram(
     data: *const u8,
     len: usize,
 ) {
+    // SAFETY: the private wrapper supplies valid ROM functions and RAM data,
+    // excludes other execution from flash, and validates page alignment/range.
     unsafe {
         connect_internal_flash();
         flash_exit_xip();
@@ -695,6 +697,8 @@ unsafe fn erase_flash_sector_from_ram(
     flash_enter_cmd_xip: unsafe extern "C" fn(),
     offset: u32,
 ) {
+    // SAFETY: the private wrapper validates the sector and excludes flash
+    // execution; 0x20 is the 4 KiB sector erase command for this board's flash.
     unsafe {
         connect_internal_flash();
         flash_exit_xip();
@@ -768,7 +772,9 @@ where
             next_log_us = current_us.saturating_add(LOG_PERIOD_US);
         }
 
-        if let Some(amount) = logger.borrow_mut().take_read_command() {
+        // Drop the RefMut before the branch borrows the logger again.
+        let read_command = logger.borrow_mut().take_read_command();
+        if let Some(amount) = read_command {
             let mut logger = logger.borrow_mut();
             let recovery = log.borrow().recovery();
             logger.log_read_begin(amount, recovery.valid_pages, recovery.newest_counter);

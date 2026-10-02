@@ -58,16 +58,11 @@ fn submitted_io_completion_wakes_parked_task() {
     runtime.tick(16, 16).expect("tick");
     assert_eq!(STEPS.load(Ordering::Relaxed), 1);
 
-    runtime
-        .submit(
-            net::NetOp::UdpRecv {
-                fd: receiver.as_raw_fd(),
-                ptr: buf.as_mut_ptr(),
-                len: buf.len(),
-            },
-            Some(task),
-        )
-        .expect("submit");
+    // SAFETY: receiver remains open and buf remains stable/writable until the task is woken.
+    let recv = unsafe { net::RawNetOp::new(net::NetOp::UdpRecv {
+        fd: receiver.as_raw_fd(), ptr: buf.as_mut_ptr(), len: buf.len(),
+    }) };
+    runtime.submit(recv, Some(task)).expect("submit");
     sender
         .send_to(b"wake", receiver.local_addr().expect("addr"))
         .expect("send");
@@ -75,4 +70,16 @@ fn submitted_io_completion_wakes_parked_task() {
     runtime.run().expect("run should complete after wake");
     assert_eq!(STEPS.load(Ordering::Relaxed), 2);
     assert!(!runtime.has_work());
+}
+
+#[test]
+fn io_errors_preserve_the_source_chain() {
+    use std::error::Error;
+    let error = RuntimeError::Io(std::io::Error::from_raw_os_error(5));
+    assert!(error
+        .source()
+        .unwrap()
+        .downcast_ref::<std::io::Error>()
+        .is_some());
+    assert!(RuntimeError::Stalled { parked_tasks: 1 }.source().is_none());
 }

@@ -16,6 +16,9 @@ impl ArenaClass {
     }
 }
 
+/// Caller-managed slice descriptor, not an owning or generation-checked lease.
+/// Copies refer to the same slot. Release exactly once, after all I/O using the
+/// slot has completed; do not reuse a descriptor after releasing it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ArenaHandle {
     pub class: ArenaClass,
@@ -185,6 +188,8 @@ impl RuntimeArenas {
         self.small.len()
     }
 
+    /// Raw registration descriptors. Keep this arena alive and exclude mutable
+    /// access while the kernel owns any submitted operation referencing them.
     pub fn small_registered_iovecs(&self) -> Vec<libc::iovec> {
         self.small.registered_iovecs()
     }

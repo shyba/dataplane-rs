@@ -1,3 +1,8 @@
+//! Compile-surface probe for the allocator-backed RP2040 execution primitives.
+//! Uses a deliberately leaking 1 KiB bump allocator on one core with interrupts
+//! disabled; it is not a reusable firmware allocator. Checks one item/count drain
+//! and leaves the result in a volatile cell before sleeping.
+//! Build/check with `--features bare-metal-bin --target thumbv6m-none-eabi`.
 #![cfg_attr(target_os = "none", no_std)]
 #![cfg_attr(target_os = "none", no_main)]
 
@@ -147,15 +152,16 @@ fn main() -> ! {
     let _ = task.poll_dummy();
 
     let mut exec = LocalExec::new(1);
-    exec.push(0, 1u32);
+    exec.push(0, 1u32).expect("valid smoke slot");
     let mut counts = LocalExecCounts::new(1);
-    counts.push_count(0, 1);
+    counts.push_count(0, 1).expect("valid smoke count");
 
     let mut progressed = 0usize;
     let mut counted = 0usize;
     progressed += exec.drain(1, 1, true, |_| {});
     counted += counts.drain(1, 1, true, || {});
 
+    assert_eq!((progressed, counted), (1, 1));
     SMOKE_RESULT.record((progressed as u32) << 16 | counted as u32);
     let _ = (task, exec, counts);
     loop {

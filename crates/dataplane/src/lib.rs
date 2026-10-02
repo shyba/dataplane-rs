@@ -51,7 +51,7 @@ pub mod task {
 
 /// Network operation vocabulary for tasks that submit reactor I/O.
 pub mod net {
-    pub use dataplane_reactor::reactor::{NetEvent, NetOp, NetOpKind, OpToken};
+    pub use dataplane_reactor::reactor::{NetEvent, NetOp, NetOpKind, OpToken, RawNetOp};
 }
 
 /// Errors surfaced while building or driving a [`Runtime`].
@@ -85,7 +85,14 @@ impl core::fmt::Display for RuntimeError {
     }
 }
 
-impl std::error::Error for RuntimeError {}
+impl std::error::Error for RuntimeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Reactor(error) | Self::Io(error) => Some(error),
+            Self::Profile(_) | Self::Stalled { .. } => None,
+        }
+    }
+}
 
 /// Builder for [`Runtime`]. Obtain via [`Runtime::builder`].
 pub struct RuntimeBuilder<T>
@@ -182,12 +189,11 @@ where
         self.inner.has_work()
     }
 
-    /// Submit a reactor operation. When `wake` names a task, that task is
-    /// requeued (woken from [`task::StepResult::Parked`]) on the tick that
-    /// drains the operation's completion.
+    /// Submit a previously validated raw-pointer reactor operation. The wrapper's
+    /// constructor safety contract continues until terminal completion or backend teardown.
     pub fn submit(
         &mut self,
-        op: net::NetOp,
+        op: net::RawNetOp,
         wake: Option<TaskRef>,
     ) -> Result<net::OpToken, RuntimeError> {
         let wake = match wake {

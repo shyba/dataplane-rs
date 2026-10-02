@@ -1,4 +1,5 @@
 [package]
+license.workspace = true
 name = "dataplane-x86_64-virtio-smoke"
 version = "0.1.0"
 edition = "2021"

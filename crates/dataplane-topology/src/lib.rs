@@ -56,8 +56,8 @@ pub enum TopologyPlacementPolicy {
     /// Round-robin shards over the CPUs reported by `core_affinity`
     /// (or the profile's allowlist).
     CoreAffinity,
-    /// Round-robin shards over `0..available_parallelism` with no
-    /// topology awareness.
+    /// Round-robin shards over the allowlist, or `0..available_parallelism`
+    /// when no allowlist is set, with no topology awareness.
     GenericRoundRobin,
 }
 
@@ -164,13 +164,29 @@ impl TopologyProfile {
     pub fn resolve(&self) -> Result<ResolvedTopologyProfile, TopologyProfileError> {
         self.validate()?;
         let topology = match &self.placement {
-            TopologyPlacementPolicy::Auto => best_shard_topology(self.shard_count),
+            TopologyPlacementPolicy::Auto => {
+                if self.cpu_allowlist.is_some() {
+                    best_topology_for_cpus(self.shard_count, &self.allowed_cpu_ids()?)
+                } else {
+                    best_shard_topology(self.shard_count)
+                }
+            }
             TopologyPlacementPolicy::Hwloc { domain } => self.resolve_with_hwloc(*domain)?,
             TopologyPlacementPolicy::CoreAffinity => {
                 let cpus = self.allowed_cpu_ids()?;
                 core_affinity_round_robin(self.shard_count, &cpus)
             }
-            TopologyPlacementPolicy::GenericRoundRobin => generic_round_robin(self.shard_count),
+            TopologyPlacementPolicy::GenericRoundRobin => {
+                if self.cpu_allowlist.is_some() {
+                    build_topology(
+                        self.shard_count,
+                        TopologyStrategy::GenericRoundRobin,
+                        vec![self.allowed_cpu_ids()?],
+                    )
+                } else {
+                    generic_round_robin(self.shard_count)
+                }
+            }
         };
         Ok(ResolvedTopologyProfile {
             profile: self.clone(),
@@ -221,7 +237,7 @@ impl TopologyProfile {
         }
 
         match &self.fallback {
-            TopologyFallbackPolicy::Auto => Ok(best_shard_topology(self.shard_count)),
+            TopologyFallbackPolicy::Auto => Ok(best_topology_for_cpus(self.shard_count, &allowed)),
             TopologyFallbackPolicy::Ordered(strategies) => strategies
                 .iter()
                 .find_map(|strategy| topology_for_strategy(self.shard_count, &allowed, *strategy))
@@ -428,11 +444,14 @@ pub fn best_shard_topology(shard_count: usize) -> ShardTopology {
     allowed.sort_unstable();
     allowed.dedup();
 
-    if let Some(topology) = hwloc_topology(shard_count, &allowed) {
-        return topology;
-    }
+    best_topology_for_cpus(shard_count, &allowed)
+}
 
-    core_affinity_round_robin(shard_count, &allowed)
+// Keep the same CPU restriction through every fallback. Discovery failure must
+// not silently move a shard outside an explicit allowlist.
+fn best_topology_for_cpus(shard_count: usize, allowed: &[usize]) -> ShardTopology {
+    hwloc_topology(shard_count, allowed)
+        .unwrap_or_else(|| core_affinity_round_robin(shard_count, allowed))
 }
 
 fn topology_for_strategy(
@@ -462,7 +481,11 @@ fn topology_for_strategy(
         TopologyStrategy::CoreAffinityRoundRobin => {
             Some(core_affinity_round_robin(shard_count, allowed))
         }
-        TopologyStrategy::GenericRoundRobin => Some(generic_round_robin(shard_count)),
+        TopologyStrategy::GenericRoundRobin => Some(build_topology(
+            shard_count,
+            TopologyStrategy::GenericRoundRobin,
+            vec![allowed.to_vec()],
+        )),
     }
 }
 

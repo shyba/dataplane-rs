@@ -44,16 +44,14 @@ pub struct SqpollConfig {
     pub idle_ms: u32,
 }
 
+/// Requested runtime width. The default stays at the reference two shards;
+/// additional per-shard rings and arenas are opt-in via `RANCH_URING_SHARDS`.
 pub fn configured_shard_count() -> usize {
     std::env::var("RANCH_URING_SHARDS")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .map(|n| n.clamp(1, DEFAULT_SHARDS_MAX))
-        .unwrap_or_else(|| {
-            std::thread::available_parallelism()
-                .map(|p| p.get().clamp(1, DEFAULT_SHARDS_MAX))
-                .unwrap_or(1)
-        })
+        .unwrap_or(2)
 }
 
 pub fn configured_topology_profile(shards: usize) -> TopologyProfile {
@@ -73,7 +71,7 @@ pub fn configured_topology_profile(shards: usize) -> TopologyProfile {
         ProfileKind::Balanced => TopologyProfile::balanced_dual_shard(),
         ProfileKind::Performance => TopologyProfile::performance_dual_shard(),
     };
-    let _ = shards;
+    profile.shard_count = shards;
     profile.cpu_allowlist = configured_cpu_allowlist();
     profile
 }
@@ -274,6 +272,9 @@ struct RegisteredReadSlotDescriptor {
 
 impl LockedReadBufPool {
     pub fn new(slots: usize) -> Result<Self> {
+        if slots > u16::MAX as usize + 1 {
+            return Err(NifError::from_errno(libc::EINVAL));
+        }
         let mut storage = Vec::with_capacity(slots);
         let mut free = Vec::with_capacity(slots);
         for idx in 0..slots {
@@ -402,14 +403,14 @@ impl LockedReadBufPool {
     }
 }
 
-impl Drop for LockedReadBufPool {
+// Slot ownership also covers partial construction: if a later mlock fails,
+// previously locked slots are unlocked before their allocations are released.
+impl Drop for LockedReadBufSlot {
     fn drop(&mut self) {
-        for slot in &self.slots {
-            // SAFETY: every slot owns its boxed storage and this drop path runs once, so each
-            // `munlock` uses a valid pointer/length pair that previously succeeded in `mlock`.
-            unsafe {
-                libc::munlock(slot.buf.as_ptr() as *const libc::c_void, slot.buf.len());
-            }
+        // SAFETY: slots are constructed only after mlock succeeds and own their
+        // stable boxed allocation until this drop returns.
+        unsafe {
+            libc::munlock(self.buf.as_ptr() as *const libc::c_void, self.buf.len());
         }
     }
 }
@@ -429,7 +430,10 @@ struct ProvidedRecvBufSlot {
 }
 
 impl ProvidedRecvPool {
+    /// Construct a pool whose buffer ids and removal count fit the kernel's u16 fields.
+    /// Panics before allocation if `count > u16::MAX`.
     pub fn new(bgid: u16, count: usize) -> Self {
+        assert!(count <= u16::MAX as usize, "provided buffer count exceeds u16");
         let mut slots = Vec::with_capacity(count);
         for _ in 0..count {
             slots.push(ProvidedRecvBufSlot {
@@ -449,6 +453,10 @@ impl ProvidedRecvPool {
 
     pub fn len(&self) -> usize {
         self.slots.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.slots.is_empty()
     }
 
     #[inline]
@@ -598,7 +606,7 @@ impl ProvidedRecvPool {
     }
 
     pub fn slice(&self, slot_id: BufSlotId, len: usize) -> Option<&[u8]> {
-        self.provided_slot(slot_id).map(|slot| &slot.buf[..len])
+        self.provided_slot(slot_id)?.buf.get(..len)
     }
 
     #[cfg(any(test, feature = "test-support"))]
@@ -717,6 +725,7 @@ struct OpSlot {
 }
 
 #[repr(align(64))]
+#[derive(Default)]
 pub struct OpTable {
     slots: Slab<OpSlot>,
     generations: Vec<u32>,
@@ -805,6 +814,20 @@ mod slot_id_tests {
         decode_token, encode_token, BufPoolKind, BufSlotId, BufSlotState, LockedReadBufPool,
         LockedReadReleaseError, Op, OpTable, PoolLifetimeState, ProvidedRecvPool, BUF_SIZE,
     };
+
+    #[test]
+    fn invalid_pool_sizes_fail_before_allocating_buffers() {
+        assert!(LockedReadBufPool::new(u16::MAX as usize + 2).is_err());
+        assert!(std::panic::catch_unwind(|| ProvidedRecvPool::new(1, u16::MAX as usize + 1)).is_err());
+    }
+
+    #[test]
+    fn provided_slice_rejects_out_of_range_length() {
+        let pool = ProvidedRecvPool::new(1, 1);
+        let id = pool.slot_id_for_bid(0).unwrap();
+        assert_eq!(pool.slice(id, BUF_SIZE + 1), None);
+        assert_eq!(pool.slice(id, BUF_SIZE).unwrap().len(), BUF_SIZE);
+    }
 
     #[test]
     fn buf_pool_kind_tags_are_stable() {

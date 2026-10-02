@@ -1,3 +1,8 @@
+//! Erlang boundary encoding and result delivery for the host runtime.
+//!
+//! Atom/binary helpers require a live Erlang VM; pure error and synchronous
+//! result-channel tests run under Cargo. `bench_support` is intentionally a
+//! synthetic, unbounded workload generator, not production admission control.
 #![deny(clippy::undocumented_unsafe_blocks)]
 #![deny(unsafe_code)]
 
@@ -57,16 +62,16 @@ mod tests {
         assert!(expected.as_slice().iter().all(|&b| b == 0x5a));
     }
 
-    /// DP-NB-0036: Regression test for EPERM/eperm mapping in error encoding.
-    /// Ignored: atoms::error() is a rustler atom accessor - triggers UB in
-    /// rustler-codegen without a NIF Env. See test_ok_atom_exists.
-    #[ignore = "requires NIF runtime atom initialization - UB in rustler codegen without Env"]
+    /// Error-name mapping is pure Rust and does not need a NIF environment.
     #[test]
     fn test_error_terms_encode_eperm() {
-        // EOPNOTSUPP is the only special-cased error (→ enotsup atom).
-        // EPERM should map to its atom name via NifError::atom_name().
+        // All reply paths must agree on error names, without initializing atoms.
         let eperm = NifError::from_errno(libc::EPERM);
         assert_eq!(eperm.atom_name(), "eperm");
+        assert_eq!(
+            NifError::from_errno(libc::EOPNOTSUPP).atom_name(),
+            "enotsup"
+        );
     }
 
     /// DP-NB-0037: Regression test for timeout and closed atoms.

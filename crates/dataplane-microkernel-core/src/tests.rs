@@ -324,3 +324,16 @@ fn fixed_network_task_delegates_frame_level_rx_tx() {
     assert!(received.descriptor.is_rx());
     assert_eq!(received.transport_len, 60);
 }
+
+#[test]
+fn empty_status_removes_task_without_leaking_active_count() {
+    let mut table = TaskTable::<1>::new();
+    let id = TaskId::new(0);
+    for _ in 0..4 {
+        table.insert(id, EndpointId::new(1)).unwrap();
+        assert_eq!(table.active_count(), 1);
+        table.set_status(id, TaskStatus::Empty).unwrap();
+        assert_eq!(table.active_count(), 0);
+        assert_eq!(table.get(id), Err(TaskTableError::Empty(id)));
+    }
+}

@@ -1,5 +1,5 @@
 use core::mem::size_of;
-use core::ptr::write_volatile;
+use core::ptr::{read_volatile, write_volatile};
 
 use dataplane_microkernel_core::{
     EthernetFrameSpec, FixedNetworkDriver, NetworkFrameDescriptor, NetworkFrameDirection,
@@ -192,7 +192,7 @@ impl<'a> FixedNetworkDriver<NetworkTaskMemory<'a>, FailReason> for VirtioLegacyP
                         NetworkFrameType::Ethernet,
                         NET_RX_BUFFER_ID,
                         (len as usize) - VIRTIO_NET_HDR_LEN,
-                        NET_TASK_BYTES - RX_BUFFER_OFFSET - VIRTIO_NET_HDR_LEN,
+                        2048 - VIRTIO_NET_HDR_LEN,
                     )
                     .map_err(|_| FailReason("net-rx-descriptor"))?,
                     transport_len,
@@ -310,18 +310,19 @@ fn zero_region(region: &mut [u8; NET_TASK_BYTES], offset: usize, len: usize) {
     }
 }
 
+// Queue memory is shared with the device. Access each ring field as one
+// volatile word, not separate byte loads/stores that can tear an index update.
+// setup_queue checks page alignment; every caller uses an aligned, in-bounds
+// virtqueue field offset. x86 is little-endian. Fences at publication/polling
+// sites remain necessary: volatile access alone is not a memory barrier.
 fn write_u16_region(region: &mut [u8; NET_TASK_BYTES], offset: usize, value: u16) {
-    region[offset] = value as u8;
-    region[offset + 1] = (value >> 8) as u8;
+    unsafe { write_volatile(region.as_mut_ptr().add(offset).cast::<u16>(), value) };
 }
 
 fn read_u16_region(region: &[u8; NET_TASK_BYTES], offset: usize) -> u16 {
-    u16::from(region[offset]) | (u16::from(region[offset + 1]) << 8)
+    unsafe { read_volatile(region.as_ptr().add(offset).cast::<u16>()) }
 }
 
 fn read_u32_region(region: &[u8; NET_TASK_BYTES], offset: usize) -> u32 {
-    u32::from(region[offset])
-        | (u32::from(region[offset + 1]) << 8)
-        | (u32::from(region[offset + 2]) << 16)
-        | (u32::from(region[offset + 3]) << 24)
+    unsafe { read_volatile(region.as_ptr().add(offset).cast::<u32>()) }
 }

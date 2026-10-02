@@ -1,5 +1,4 @@
-//! Generic io_uring runtime machinery, extracted from the ranch_uring
-//! native crate (M4 step: aidocs/001_ranch_uring_runtime_migration.md).
+//! Generic io_uring buffer, ring, and completion machinery used by the Ranch NIF.
 //!
 //! Nothing in this crate names an Erlang/rustler type. Delivery-facing
 //! structures (`result_queue`) are generic over the reply target and

@@ -1,8 +1,7 @@
 //! Clock helpers for the runtime.
 //!
-//! This module extracts clock-related helpers from runtime_helpers.
-//! Declared as a #[path] submodule of runtime, so it can be accessed
-//! from runtime_helpers via `super::runtime_clock::*`.
+//! All raw receive timestamps must come from [`recv_clock_raw`]; raw clock
+//! ticks are not nanoseconds and must not be mixed with another clock's epoch.
 
 use std::sync::OnceLock;
 

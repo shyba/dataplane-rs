@@ -1,3 +1,7 @@
+//! Fixed-capacity RP2040 smoke assertions for task generations, queue exhaustion,
+//! and bounded execution. No allocator is installed. Success reaches the final
+//! WFI loop; assertions trap through the panic handler. Host execution is a stub,
+//! not a hardware test. Check with `--features bare-metal-bin --target thumbv6m-none-eabi`.
 #![cfg_attr(target_os = "none", no_std)]
 #![cfg_attr(target_os = "none", no_main)]
 
@@ -114,9 +118,9 @@ fn main() -> ! {
     // ------------------------------------------------------------
 
     let mut items: FixedLocalExec<u8, 2, 4> = FixedLocalExec::new();
-    let _ = items.push(0, 1);
-    let _ = items.push(0, 2);
-    let _ = items.push(1, 3);
+    items.push(0, 1).expect("smoke capacity");
+    items.push(0, 2).expect("smoke capacity");
+    items.push(1, 3).expect("smoke capacity");
 
     let mut item_total = 0u32;
     let item_progress = items.drain(usize::MAX, 1, false, |item| {
@@ -124,8 +128,8 @@ fn main() -> ! {
     });
 
     let mut counts: FixedLocalExecCounts<2, 4> = FixedLocalExecCounts::new();
-    let _ = counts.push_count(0, 2);
-    let _ = counts.push_count(1, 1);
+    counts.push_count(0, 2).expect("smoke capacity");
+    counts.push_count(1, 1).expect("smoke capacity");
 
     let mut count_total = 0u32;
     let count_progress = counts.drain(usize::MAX, 1, false, || {
@@ -133,8 +137,12 @@ fn main() -> ! {
     });
 
     let mut step_counts: FixedLocalExecCounts<1, 4> = FixedLocalExecCounts::new();
-    let _ = step_counts.push_count(0, 2);
+    step_counts.push_count(0, 2).expect("smoke capacity");
     let step = drive_counts_step(&mut step_counts, 1, 1, false);
+    assert_eq!((item_progress, item_total), (3, 6));
+    assert_eq!((count_progress, count_total), (3, 3));
+    assert_eq!(step.progressed, 1);
+    assert!(step.work_remaining);
     let settings = DataPlaneSettings::new().with_native_hot_task_budget(2);
     let wait = WaitTag::new_local(LocalWaitKind::Runnable, 1);
     let op = ScheduledOp {
