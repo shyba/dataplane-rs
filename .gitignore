@@ -15,3 +15,16 @@ ralph_simple.py
 PLAN*.md
 RUNTIME_SPLIT*.md
 experiments/
+
+# Local agent notes and planning artifacts
+/aidocs/
+/.claude/
+/.pi/
+plans/
+plan.md
+plan-*.md
+plan_*.md
+*-plan.md
+*_plan.md
+/docs/*-quality-review.md
+/docs/*-quality-results/
