@@ -5,6 +5,9 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
 
 main="crates/dataplane-x86_64-virtio-smoke/src/main.rs"
+network="crates/dataplane-x86_64-virtio-smoke/src/network.rs"
+virtio="crates/dataplane-x86_64-virtio-smoke/src/virtio.rs"
+fault="crates/dataplane-x86_64-virtio-smoke/src/fault.rs"
 manifest="crates/dataplane-x86_64-virtio-smoke/Cargo.toml"
 build_script="tools/x86_64_virtio_smoke_build.sh"
 runner="tools/x86_64_virtio_udp_bench_run.sh"
@@ -39,29 +42,29 @@ require_literal Makefile 'x86_64-virtio-udp-bench:' \
 require_literal "$build_script" 'X86_64_VIRTIO_FEATURES' \
   "build script must support opt-in feature builds for the UDP bench"
 
-require_literal "$main" 'UDP_BENCH_PACKETS' \
+require_literal "$network" 'UDP_BENCH_PACKETS' \
   "guest must keep the UDP bench packet count explicit"
 require_literal "$main" 'NetworkDriverTask' \
   "UDP bench must run inside the existing network task object"
-require_literal "$main" 'arm_receive' \
+require_literal "$network" 'arm_receive' \
   "driver abstraction must be able to re-arm RX between UDP packets"
-require_literal "$main" 'prepare_rx_buffer' \
+require_literal "$virtio" 'self.rx.submit_writable' \
   "UDP bench must recycle the virtio RX buffer instead of using a TX-only path"
-require_literal "$main" 'validate_udp_bench_request' \
+require_literal "$network" 'validate_udp_bench_request' \
   "guest must parse and validate inbound UDP requests"
-require_literal "$main" 'prepare_udp_bench_response_packet' \
+require_literal "$network" 'prepare_udp_bench_response_packet' \
   "guest must generate deterministic UDP responses"
-require_literal "$main" 'ipv4_header_checksum' \
+require_literal "$network" 'ipv4_header_checksum' \
   "guest must use an IPv4 header checksum instead of opaque payload matching"
 require_literal "$main" 'DPX86:UDP-BENCH' \
   "guest must emit a UDP bench completion marker"
-require_literal "$main" 'protected_net_region' \
+require_literal "$main" 'with_network_region' \
   "UDP bench must keep driver memory behind the protected task region"
 require_literal "$main" 'mmu::allow_region' \
   "protected task access must still be explicitly allowed"
 require_literal "$main" 'mmu::deny_region' \
   "protected task access must still be explicitly denied"
-require_literal "$main" 'DRIVER_FAULT_SEEN' \
+require_literal "$fault" 'DRIVER_FAULT_SEEN' \
   "UDP bench must preserve the denied-page fault containment proof"
 
 require_literal "$runner" 'qemu-system-x86_64' \

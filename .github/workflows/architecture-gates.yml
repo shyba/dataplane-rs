@@ -64,8 +64,8 @@ jobs:
             cmd: cargo check -p dataplane-runtime --no-default-features --features host-runtime,scheduler-shares
           - name: runtime erlang-nif
             cmd: cargo check -p dataplane-runtime --features erlang-nif
-          - name: reactor runtime-tools
-            cmd: cargo check -p dataplane-reactor --features runtime-tools
+          - name: reactor runtime-tools all targets
+            cmd: cargo check -p dataplane-reactor --features runtime-tools --all-targets
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -85,3 +85,44 @@ jobs:
           cargo check -p dataplane-core-reactor --no-default-features --features noalloc --target thumbv6m-none-eabi
           cargo check -p dataplane-runtime --no-default-features --features noalloc --target thumbv6m-none-eabi
           cargo check -p dataplane-runtime --no-default-features --features rp2040-integration --target thumbv6m-none-eabi
+
+
+  rust-quality-and-nif-host-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Strict workspace library Clippy
+        run: cargo clippy --workspace --lib -- -D warnings
+      - name: Strict workspace rustdoc links
+        env:
+          RUSTDOCFLAGS: -D rustdoc::broken_intra_doc_links
+        run: cargo doc --workspace --no-deps
+      - name: Native NIF host tests (default features)
+        run: cargo test --manifest-path applications/erlang/ranch_uring/native/Cargo.toml --lib
+      - name: Native NIF host tests (SQPOLL feature)
+        run: cargo test --manifest-path applications/erlang/ranch_uring/native/Cargo.toml --lib --no-default-features --features scheduler-fifo,ingress-kanal,exec-strategy-sqpoll
+
+      - name: Runtime ESP32 integration tests
+        run: cargo test -p dataplane-runtime --features esp32-integration
+      - name: Runtime scheduler-shares tests
+        run: cargo test -p dataplane-runtime --no-default-features --features host-runtime,scheduler-shares
+      - name: Check runtime all targets
+        run: cargo check -p dataplane-runtime --all-targets
+
+  erlang-vm-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: '27.3'
+          rebar3-version: '3.25.0'
+      - name: Install native build prerequisites
+        run: sudo apt-get update && sudo apt-get install --yes build-essential liburing-dev
+      - name: Run Common Test against loaded NIF
+        working-directory: applications/erlang/ranch_uring
+        run: rebar3 ct --suite ranch_uring_SUITE

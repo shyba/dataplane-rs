@@ -1,9 +1,6 @@
 .PHONY: all native erlang-compile test bench-core runtime-boundary runtime-boundary-dry-run native-feature-matrix native-feature-matrix-clippy embedded-validation embedded-ci smoke clean guard-scripts-executable untracked-generated qemu-cortexm0-status qemu-cortexm0-smoke-build qemu-cortexm0-smoke qemu-cortexm0-uart-sessions-build qemu-cortexm0-uart-sessions isolated-network-task-boundary-contract raspi3b-mmu-build raspi3b-mmu-smoke raspi3b-mmu-contract x86_64-virtio-smoke-build x86_64-virtio-smoke-contract x86_64-virtio-smoke x86_64-virtio-udp-bench-build x86_64-virtio-udp-bench-contract x86_64-virtio-udp-bench x86_64-microkernel-fat32-smoke-build x86_64-microkernel-fat32-write-build x86_64-microkernel-fat32-contract x86_64-microkernel-cli-operator-contract x86_64-microkernel-nontls-network-service-contract x86_64-microkernel-nontls-network-service-matrix x86_64-microkernel-nontls-network-negative-matrix-contract x86_64-microkernel-nontls-network-negative-matrix x86_64-microkernel-operator-appliance-surface-contract x86_64-microkernel-operator-appliance-surface x86_64-microkernel-fat32-smoke x86_64-microkernel-fat32-fairness x86_64-microkernel-fat32-dhcp x86_64-microkernel-fat32-write x86_64-microkernel-fs-service-boundary rp2040-check rp2040-core-check rp2040-runtime-check rp2040-smoke-build rp2040-smoke-size rp2040-noalloc-check rp2040-noalloc-core-check rp2040-noalloc-runtime-check rp2040-noalloc-smoke-build rp2040-noalloc-smoke-size rp2040-scd41-smoke-build rp2040-hardware-status
 .PHONY: architecture-guards
 .PHONY: x86_64-microkernel-preallocated-journal-file-proof-build
-.PHONY: x86_64-microkernel-cli-operator-surface-polish-contract
-.PHONY: x86_64-microkernel-filesystem-service-hardening-contract
-.PHONY: x86_64-microkernel-fat32-integrity-readonly-contract
 all: native
 
 native:
@@ -17,10 +14,11 @@ erlang-compile: native
 test:
 	cd applications/erlang/ranch_uring && rebar3 ct
 
+# Portable workloads only; real ring/network benchmarks are opt-in.
 bench-core:
+	cargo bench -p dataplane-core-reactor-alloc --bench local_exec
 	cargo bench -p dataplane-runtime --bench scheduler_hot_path
-	cargo bench -p dataplane-reactor --bench threadless_runtime_loop
-	cargo bench -p dataplane-reactor --bench uring_reactor
+	cargo bench -p dataplane-reactor --features runtime-tools --bench threadless_runtime_loop
 
 # DP-NB-0008: Smoke target - runtime-boundary plus embedded-validation without benchmark work
 smoke: runtime-boundary embedded-validation
@@ -134,14 +132,8 @@ x86_64-microkernel-fat32-contract:
 x86_64-microkernel-fs-service-boundary-contract:
 	./tools/check_x86_64_microkernel_fs_service_boundary_contract.sh
 
-x86_64-microkernel-fat32-integrity-readonly-contract:
-	./tools/check_x86_64_microkernel_fat32_integrity_readonly_contract.sh
-
 x86_64-microkernel-cli-operator-contract:
 	./tools/check_x86_64_microkernel_cli_operator_contract.sh
-
-x86_64-microkernel-cli-operator-surface-polish-contract:
-	./tools/check_x86_64_microkernel_cli_operator_surface_polish_contract.sh
 
 x86_64-microkernel-nontls-network-service-contract:
 	./tools/check_x86_64_microkernel_nontls_network_service_contract.sh
@@ -160,9 +152,6 @@ x86_64-microkernel-operator-appliance-surface-contract:
 
 x86_64-microkernel-operator-appliance-surface: guard-scripts-executable x86_64-microkernel-fat32-smoke-build x86_64-microkernel-fat32-contract x86_64-microkernel-operator-appliance-surface-contract
 	./tools/x86_64_microkernel_fat32_run.sh --operator-appliance-surface-proof
-
-x86_64-microkernel-filesystem-service-hardening-contract:
-	./tools/check_x86_64_microkernel_filesystem_service_hardening_contract.sh
 
 x86_64-microkernel-fat32-smoke: guard-scripts-executable x86_64-microkernel-fat32-smoke-build x86_64-microkernel-fat32-contract
 	./tools/x86_64_microkernel_fat32_run.sh

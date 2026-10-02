@@ -21,3 +21,6 @@ members = [
     "crates/dataplane-rp2040-noalloc-smoke",
     "crates/dataplane-rp2040-scd41-smoke",
 ]
+
+[workspace.package]
+license = "AGPL-3.0-only"

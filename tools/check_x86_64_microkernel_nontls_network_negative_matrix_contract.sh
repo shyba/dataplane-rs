@@ -4,8 +4,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 kernel="crates/dataplane-x86_64-microkernel-smoke/src/kernel.rs"
-network_task="crates/dataplane-x86_64-microkernel-smoke/src/network_task.rs"
-scenarios="crates/dataplane-x86_64-microkernel-smoke/src/scenarios.rs"
+# Protocol implementations are split across this module directory.
+network_task="crates/dataplane-x86_64-microkernel-smoke/src/network_task"
+scenarios="crates/dataplane-x86_64-microkernel-smoke/src/scenarios"
 runner="tools/x86_64_microkernel_fat32_run.sh"
 matrix="tools/x86_64_microkernel_validation_matrix_run.sh"
 makefile="Makefile"
@@ -16,7 +17,8 @@ fail() {
 }
 
 require_file() {
-  [[ -f "$1" ]] || fail "missing required file: $1"
+  # A Rust module directory is scanned recursively by rg.
+  [[ -f "$1" || -d "$1" ]] || fail "missing required source: $1"
 }
 
 require_literal() {
@@ -61,7 +63,7 @@ require_literal "$network_task" 'icmp_malformed: u32' \
   "guest must count malformed ICMP inputs explicitly"
 require_literal "$network_task" 'network_drop_counters.unsupported_ethertype += 1' \
   "TcpIpTask must own unsupported-ethertype accounting"
-require_literal "$network_task" 'src != VM_MAC && (dst == VM_MAC || dst == [0xff; 6])' \
+require_literal "$network_task" 'src != crate::layout::VM_MAC && (dst == crate::layout::VM_MAC || dst == [0xff; 6])' \
   "unsupported-ethertype accounting must ignore the guest's own raw probe frames"
 require_literal "$network_task" 'network_drop_counters.arp_malformed += 1' \
   "TcpIpTask must own malformed-ARP accounting"

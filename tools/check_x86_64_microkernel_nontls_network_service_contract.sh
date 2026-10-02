@@ -4,8 +4,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 main="crates/dataplane-x86_64-microkernel-smoke/src/main.rs"
-network_task="crates/dataplane-x86_64-microkernel-smoke/src/network_task.rs"
-scenarios="crates/dataplane-x86_64-microkernel-smoke/src/scenarios.rs"
+# Protocol implementations are split across this module directory.
+network_task="crates/dataplane-x86_64-microkernel-smoke/src/network_task"
+scenarios="crates/dataplane-x86_64-microkernel-smoke/src/scenarios/network.rs"
 virtio_net="crates/dataplane-x86_64-microkernel-smoke/src/virtio_net.rs"
 runner="tools/x86_64_microkernel_fat32_run.sh"
 matrix="tools/x86_64_microkernel_validation_matrix_run.sh"
@@ -93,7 +94,7 @@ reject_impl_literal() {
 echo "=== x86_64 Microkernel Non-TLS Network Service Contract Guard ==="
 
 require_file "$main"
-require_file "$network_task"
+[[ -d "$network_task" ]] || fail "missing network module directory: $network_task"
 require_file "$scenarios"
 require_file "$virtio_net"
 require_file "$runner"
@@ -157,7 +158,7 @@ require_literal "$network_task" 'network_drop_counters.arp_malformed += 1' \
   "TcpIpTask must count ARP malformed drops"
 require_literal "$network_task" 'network_drop_counters.unsupported_ethertype += 1' \
   "TcpIpTask must count unsupported ethertype drops"
-require_literal "$network_task" 'src != VM_MAC && (dst == VM_MAC || dst == [0xff; 6])' \
+require_literal "$network_task" 'src != crate::layout::VM_MAC && (dst == crate::layout::VM_MAC || dst == [0xff; 6])' \
   "TcpIpTask must not count its own raw probe as a host unsupported-ethertype drop"
 require_literal "$network_task" 'network_drop_counters.ipv4_wrong_target += 1' \
   "TcpIpTask must count IPv4 wrong-target drops"
