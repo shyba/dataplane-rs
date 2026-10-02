@@ -6,8 +6,15 @@ thread-per-core designs—not as a drop-in Tokio replacement. APIs are evolving.
 
 ## Try it
 
-On Linux, install a current stable Rust toolchain and a C compiler/linker, then
-run from this checkout:
+On Linux, install a current stable Rust toolchain, a C compiler/linker,
+`pkg-config`, and the hwloc development library. On Debian/Ubuntu:
+
+```sh
+sudo apt-get update
+sudo apt-get install --yes build-essential pkg-config libhwloc-dev
+```
+
+Then run from this checkout:
 
 ```sh
 cargo run -p dataplane --example hello_tasks

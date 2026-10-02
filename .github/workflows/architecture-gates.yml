@@ -38,6 +38,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install host topology build prerequisites
+        run: sudo apt-get update && sudo apt-get install --yes pkg-config libhwloc-dev
       - name: Test core crates with default features
         run: |
           set -eu
@@ -69,6 +71,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install host topology build prerequisites
+        run: sudo apt-get update && sudo apt-get install --yes pkg-config libhwloc-dev
       - name: ${{ matrix.name }}
         run: ${{ matrix.cmd }}
 
@@ -93,6 +97,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Install host topology build prerequisites
+        run: sudo apt-get update && sudo apt-get install --yes pkg-config libhwloc-dev
       - name: Strict workspace library Clippy
         run: cargo clippy --workspace --lib -- -D warnings
       - name: Strict workspace rustdoc links
@@ -122,7 +128,7 @@ jobs:
           otp-version: '27.3'
           rebar3-version: '3.25.0'
       - name: Install native build prerequisites
-        run: sudo apt-get update && sudo apt-get install --yes build-essential liburing-dev
+        run: sudo apt-get update && sudo apt-get install --yes build-essential pkg-config libhwloc-dev liburing-dev
       - name: Run Common Test against loaded NIF
         working-directory: applications/erlang/ranch_uring
         run: rebar3 ct --suite ranch_uring_SUITE
